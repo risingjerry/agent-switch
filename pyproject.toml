@@ -27,10 +27,10 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/JNHFlow21/agent-switch"
-Documentation = "https://github.com/JNHFlow21/agent-switch#readme"
-Issues = "https://github.com/JNHFlow21/agent-switch/issues"
-Repository = "https://github.com/JNHFlow21/agent-switch"
+Homepage = "https://github.com/risingjerry/agent-switch"
+Documentation = "https://github.com/risingjerry/agent-switch#readme"
+Issues = "https://github.com/risingjerry/agent-switch/issues"
+Repository = "https://github.com/risingjerry/agent-switch"
 
 [project.scripts]
 agent-switch = "agent_switch.cli:main"

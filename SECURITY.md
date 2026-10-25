@@ -2,7 +2,7 @@
 
 ## Report a vulnerability
 
-Please use [GitHub private vulnerability reporting](https://github.com/JNHFlow21/agent-switch/security/advisories/new). Do not open a public issue containing a secret, credential, private path, or exploit detail.
+Please use [GitHub private vulnerability reporting](https://github.com/risingjerry/agent-switch/security/advisories/new). Do not open a public issue containing a secret, credential, private path, or exploit detail.
 
 ## Secret handling contract
 

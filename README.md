@@ -13,16 +13,16 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/JNHFlow21/agent-switch/actions/workflows/ci.yml"><img src="https://github.com/JNHFlow21/agent-switch/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
+  <a href="https://github.com/risingjerry/agent-switch/actions/workflows/ci.yml"><img src="https://github.com/risingjerry/agent-switch/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
   <a href="https://www.apple.com/macos/"><img src="https://img.shields.io/badge/macOS-14%2B-111111?logo=apple" alt="macOS 14 or newer"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-111111.svg" alt="MIT license"></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/JNHFlow21/agent-switch/stargazers"><img src="https://img.shields.io/github/stars/JNHFlow21/agent-switch?style=flat-square&label=stars" alt="GitHub stars"></a>
-  <a href="https://github.com/JNHFlow21/agent-switch/forks"><img src="https://img.shields.io/github/forks/JNHFlow21/agent-switch?style=flat-square&label=forks" alt="GitHub forks"></a>
-  <a href="https://github.com/JNHFlow21/agent-switch/commits/main"><img src="https://img.shields.io/github/commit-activity/t/JNHFlow21/agent-switch?style=flat-square&label=commits" alt="GitHub commit activity"></a>
-  <a href="https://github.com/JNHFlow21/agent-switch/releases"><img src="https://img.shields.io/github/downloads/JNHFlow21/agent-switch/total?style=flat-square&label=downloads" alt="Release downloads"></a>
+  <a href="https://github.com/risingjerry/agent-switch/stargazers"><img src="https://img.shields.io/github/stars/risingjerry/agent-switch?style=flat-square&label=stars" alt="GitHub stars"></a>
+  <a href="https://github.com/risingjerry/agent-switch/forks"><img src="https://img.shields.io/github/forks/risingjerry/agent-switch?style=flat-square&label=forks" alt="GitHub forks"></a>
+  <a href="https://github.com/risingjerry/agent-switch/commits/main"><img src="https://img.shields.io/github/commit-activity/t/risingjerry/agent-switch?style=flat-square&label=commits" alt="GitHub commit activity"></a>
+  <a href="https://github.com/risingjerry/agent-switch/releases"><img src="https://img.shields.io/github/downloads/risingjerry/agent-switch/total?style=flat-square&label=downloads" alt="Release downloads"></a>
   <img src="https://visitor-badge.laobi.icu/badge?page_id=JNHFlow21.agent-switch&left_text=README%20visits" alt="README visit counter">
 </p>
 
@@ -44,8 +44,8 @@ credential store, and deterministic per-agent projections.
 > [!IMPORTANT]
 > Agent Switch is **alpha software**. The public app is ad-hoc signed and is not
 > Apple-notarized. The project-owned Homebrew Cask therefore removes Gatekeeper
-> quarantine after installation. Review the [public source](https://github.com/JNHFlow21/agent-switch)
-> and [release checksums](https://github.com/JNHFlow21/agent-switch/releases/tag/v0.3.0)
+> quarantine after installation. Review the [public source](https://github.com/risingjerry/agent-switch)
+> and [release checksums](https://github.com/risingjerry/agent-switch/releases/tag/v0.3.0)
 > before installing.
 
 The native app follows the macOS language preference and ships complete
@@ -63,7 +63,7 @@ The native app follows the macOS language preference and ships complete
 Paste one verified command:
 
 ```bash
-brew tap JNHFlow21/tap && brew trust --tap JNHFlow21/tap && brew install --cask JNHFlow21/tap/agent-switch
+brew tap risingjerry/tap && brew trust --tap risingjerry/tap && brew install --cask risingjerry/tap/agent-switch
 ```
 
 Homebrew:
@@ -271,7 +271,7 @@ Homebrew installations:
 
 ```bash
 brew update
-brew upgrade --cask JNHFlow21/tap/agent-switch
+brew upgrade --cask risingjerry/tap/agent-switch
 ```
 
 Agent Switch does not silently update itself, third-party CLIs, or Skill
@@ -293,13 +293,13 @@ The source installer remains available for contributors who have Python 3.11+,
 `pipx`, and full Xcode:
 
 ```bash
-git clone https://github.com/JNHFlow21/agent-switch.git && cd agent-switch && ./scripts/install.sh
+git clone https://github.com/risingjerry/agent-switch.git && cd agent-switch && ./scripts/install.sh
 ```
 
 For an editable CLI environment:
 
 ```bash
-git clone https://github.com/JNHFlow21/agent-switch.git
+git clone https://github.com/risingjerry/agent-switch.git
 cd agent-switch
 python3 -m venv .venv
 . .venv/bin/activate
@@ -326,8 +326,8 @@ and privacy gate.
 ### Clone activity
 
 <p align="center">
-  <a href="https://github.com/JNHFlow21/agent-switch">
-    <img width="800" src="https://raw.githubusercontent.com/JNHFlow21/agent-switch/metrics/repository-metrics.svg" alt="Agent Switch rolling 14-day clone activity and repository metrics">
+  <a href="https://github.com/risingjerry/agent-switch">
+    <img width="800" src="https://raw.githubusercontent.com/risingjerry/agent-switch/metrics/repository-metrics.svg" alt="Agent Switch rolling 14-day clone activity and repository metrics">
   </a>
 </p>
 
@@ -335,4 +335,4 @@ and privacy gate.
 
 ## License
 
-[MIT](LICENSE) © 2026 JNHFlow21
+[MIT](LICENSE) © 2026 risingjerry

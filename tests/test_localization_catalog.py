@@ -39,7 +39,7 @@ class LocalizationCatalogTests(unittest.TestCase):
             self.assertIn(image, (ROOT / readme).read_text())
 
     def test_readmes_embed_the_privacy_safe_repository_metrics_chart(self) -> None:
-        chart = "https://raw.githubusercontent.com/JNHFlow21/agent-switch/metrics/repository-metrics.svg"
+        chart = "https://raw.githubusercontent.com/risingjerry/agent-switch/metrics/repository-metrics.svg"
         for readme in ("README.md", "README.zh-CN.md"):
             content = (ROOT / readme).read_text()
             self.assertIn(chart, content)

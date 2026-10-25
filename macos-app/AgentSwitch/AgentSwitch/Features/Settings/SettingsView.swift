@@ -51,7 +51,7 @@ struct SettingsView: View {
             DSMetricCard(
                 label: L10n.version,
                 value: AppVersion.current,
-                note: "github.com/JNHFlow21/agent-switch"
+                note: "github.com/risingjerry/agent-switch"
             )
         }
     }
@@ -118,7 +118,7 @@ struct SettingsView: View {
                         .font(DSTypography.body)
                         .foregroundStyle(DSColor.textSecondary)
                         .frame(width: 140, alignment: .leading)
-                    Link("github.com/JNHFlow21/agent-switch", destination: URL(string: "https://github.com/JNHFlow21/agent-switch")!)
+                    Link("github.com/risingjerry/agent-switch", destination: URL(string: "https://github.com/risingjerry/agent-switch")!)
                         .font(DSTypography.mono)
                     Spacer()
                 }

@@ -2,7 +2,7 @@
 
 > Agent Switch is a local control plane for registering supported MCPs once and storing their static credentials once across Codex, Claude Code, Claude Desktop, and Hermes on macOS.
 
-Canonical repository: https://github.com/JNHFlow21/agent-switch
+Canonical repository: https://github.com/risingjerry/agent-switch
 License: MIT
 Platform: macOS 14+ for the native app; Python 3.11+ for the CLI
 Interface languages: English and Simplified Chinese
@@ -46,8 +46,8 @@ Give a local coding agent the installation prompt at the top of README.md, or fo
 
 ## Documentation
 
-- README: https://github.com/JNHFlow21/agent-switch#readme
-- Secrets and wrappers: https://github.com/JNHFlow21/agent-switch/blob/main/docs/secrets-and-wrappers.md
-- Recovery: https://github.com/JNHFlow21/agent-switch/blob/main/docs/recovery.md
-- CC Switch compatibility: https://github.com/JNHFlow21/agent-switch/blob/main/docs/ccswitch-compat.md
-- Security: https://github.com/JNHFlow21/agent-switch/blob/main/SECURITY.md
+- README: https://github.com/risingjerry/agent-switch#readme
+- Secrets and wrappers: https://github.com/risingjerry/agent-switch/blob/main/docs/secrets-and-wrappers.md
+- Recovery: https://github.com/risingjerry/agent-switch/blob/main/docs/recovery.md
+- CC Switch compatibility: https://github.com/risingjerry/agent-switch/blob/main/docs/ccswitch-compat.md
+- Security: https://github.com/risingjerry/agent-switch/blob/main/SECURITY.md

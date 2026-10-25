@@ -21,13 +21,13 @@ class DocsTests(unittest.TestCase):
         self.assertIn("README.zh-CN.md", "\n".join(readme.splitlines()[:12]))
         self.assertIn("README.md", "\n".join(readme_zh.splitlines()[:12]))
         install_command = (
-            "brew tap JNHFlow21/tap && brew trust --tap JNHFlow21/tap && "
-            "brew install --cask JNHFlow21/tap/agent-switch"
+            "brew tap risingjerry/tap && brew trust --tap risingjerry/tap && "
+            "brew install --cask risingjerry/tap/agent-switch"
         )
         self.assertIn(install_command, readme)
         self.assertIn(install_command, readme_zh)
         source_command = (
-            "git clone https://github.com/JNHFlow21/agent-switch.git && "
+            "git clone https://github.com/risingjerry/agent-switch.git && "
             "cd agent-switch && ./scripts/install.sh"
         )
         self.assertIn(source_command, readme)

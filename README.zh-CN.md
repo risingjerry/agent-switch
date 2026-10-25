@@ -13,16 +13,16 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/JNHFlow21/agent-switch/actions/workflows/ci.yml"><img src="https://github.com/JNHFlow21/agent-switch/actions/workflows/ci.yml/badge.svg" alt="CI 状态"></a>
+  <a href="https://github.com/risingjerry/agent-switch/actions/workflows/ci.yml"><img src="https://github.com/risingjerry/agent-switch/actions/workflows/ci.yml/badge.svg" alt="CI 状态"></a>
   <a href="https://www.apple.com/macos/"><img src="https://img.shields.io/badge/macOS-14%2B-111111?logo=apple" alt="需要 macOS 14 或更高版本"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-111111.svg" alt="MIT 许可证"></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/JNHFlow21/agent-switch/stargazers"><img src="https://img.shields.io/github/stars/JNHFlow21/agent-switch?style=flat-square&label=stars" alt="GitHub stars"></a>
-  <a href="https://github.com/JNHFlow21/agent-switch/forks"><img src="https://img.shields.io/github/forks/JNHFlow21/agent-switch?style=flat-square&label=forks" alt="GitHub forks"></a>
-  <a href="https://github.com/JNHFlow21/agent-switch/commits/main"><img src="https://img.shields.io/github/commit-activity/t/JNHFlow21/agent-switch?style=flat-square&label=commits" alt="GitHub commit activity"></a>
-  <a href="https://github.com/JNHFlow21/agent-switch/releases"><img src="https://img.shields.io/github/downloads/JNHFlow21/agent-switch/total?style=flat-square&label=downloads" alt="Release downloads"></a>
+  <a href="https://github.com/risingjerry/agent-switch/stargazers"><img src="https://img.shields.io/github/stars/risingjerry/agent-switch?style=flat-square&label=stars" alt="GitHub stars"></a>
+  <a href="https://github.com/risingjerry/agent-switch/forks"><img src="https://img.shields.io/github/forks/risingjerry/agent-switch?style=flat-square&label=forks" alt="GitHub forks"></a>
+  <a href="https://github.com/risingjerry/agent-switch/commits/main"><img src="https://img.shields.io/github/commit-activity/t/risingjerry/agent-switch?style=flat-square&label=commits" alt="GitHub commit activity"></a>
+  <a href="https://github.com/risingjerry/agent-switch/releases"><img src="https://img.shields.io/github/downloads/risingjerry/agent-switch/total?style=flat-square&label=downloads" alt="Release downloads"></a>
   <img src="https://visitor-badge.laobi.icu/badge?page_id=JNHFlow21.agent-switch&left_text=README%20visits" alt="README visit counter">
 </p>
 
@@ -43,8 +43,8 @@ Agent Switch 用一个本地 MCP 注册表、一个私密凭据存储和可重�
 > [!IMPORTANT]
 > Agent Switch 目前仍是 **Alpha 软件**。公开 App 使用 ad-hoc 签名，尚未经过
 > Apple 公证，因此项目自己的 Homebrew Cask 会在安装完成后移除 Gatekeeper
-> quarantine。安装前请先检查[公开源码](https://github.com/JNHFlow21/agent-switch)
-> 和[发行校验和](https://github.com/JNHFlow21/agent-switch/releases/tag/v0.3.0)。
+> quarantine。安装前请先检查[公开源码](https://github.com/risingjerry/agent-switch)
+> 和[发行校验和](https://github.com/risingjerry/agent-switch/releases/tag/v0.3.0)。
 
 原生应用会跟随 macOS 的语言偏好，并完整提供**英文**与**简体中文**界面。
 
@@ -60,7 +60,7 @@ Agent Switch 用一个本地 MCP 注册表、一个私密凭据存储和可重�
 复制执行下面这一条经过验证的命令：
 
 ```bash
-brew tap JNHFlow21/tap && brew trust --tap JNHFlow21/tap && brew install --cask JNHFlow21/tap/agent-switch
+brew tap risingjerry/tap && brew trust --tap risingjerry/tap && brew install --cask risingjerry/tap/agent-switch
 ```
 
 Homebrew 会：
@@ -256,7 +256,7 @@ agent-switch reconcile
 
 ```bash
 brew update
-brew upgrade --cask JNHFlow21/tap/agent-switch
+brew upgrade --cask risingjerry/tap/agent-switch
 ```
 
 Agent Switch 不会静默更新自己、第三方 CLI 或 Skill 源。
@@ -276,13 +276,13 @@ Agent Switch 不会静默更新自己、第三方 CLI 或 Skill 源。
 需要 Python 3.11+、`pipx` 和完整 Xcode 的贡献者仍然可以使用源码安装器：
 
 ```bash
-git clone https://github.com/JNHFlow21/agent-switch.git && cd agent-switch && ./scripts/install.sh
+git clone https://github.com/risingjerry/agent-switch.git && cd agent-switch && ./scripts/install.sh
 ```
 
 创建可编辑的 CLI 开发环境：
 
 ```bash
-git clone https://github.com/JNHFlow21/agent-switch.git
+git clone https://github.com/risingjerry/agent-switch.git
 cd agent-switch
 python3 -m venv .venv
 . .venv/bin/activate
@@ -308,8 +308,8 @@ macOS 14。完整测试和隐私门禁见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 ### 克隆趋势
 
 <p align="center">
-  <a href="https://github.com/JNHFlow21/agent-switch">
-    <img width="800" src="https://raw.githubusercontent.com/JNHFlow21/agent-switch/metrics/repository-metrics.svg" alt="Agent Switch 最近 14 天克隆趋势与仓库指标">
+  <a href="https://github.com/risingjerry/agent-switch">
+    <img width="800" src="https://raw.githubusercontent.com/risingjerry/agent-switch/metrics/repository-metrics.svg" alt="Agent Switch 最近 14 天克隆趋势与仓库指标">
   </a>
 </p>
 
@@ -317,4 +317,4 @@ macOS 14。完整测试和隐私门禁见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ## 许可证
 
-[MIT](LICENSE) © 2026 JNHFlow21
+[MIT](LICENSE) © 2026 risingjerry

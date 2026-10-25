@@ -52,7 +52,7 @@ jobs:
           ## Install
 
           \`\`\`bash
-          brew tap JNHFlow21/tap && brew trust --tap JNHFlow21/tap && brew install --cask JNHFlow21/tap/agent-switch
+          brew tap risingjerry/tap && brew trust --tap risingjerry/tap && brew install --cask risingjerry/tap/agent-switch
           \`\`\`
 
           This build is ad-hoc signed and not notarized because the project does
