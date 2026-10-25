@@ -26,6 +26,8 @@
   <img src="https://visitor-badge.laobi.icu/badge?page_id=JNHFlow21.agent-switch&left_text=README%20visits" alt="README visit counter">
 </p>
 
+<p align="center"><img src="docs/demo.gif" width="820" alt="终端演示：用 stdin 存入凭据，agent-switch mcp add 定义一次 MCP，reconcile --dry-run 预览各 Agent 配置变更，应用后用 status 检查健康（示例数据为虚构）"></p>
+
 <p align="center">
   <img src="docs/assets/agent-switch-dashboard-en.png" width="820" alt="Agent Switch 仪表板，展示健康状态、配置漂移、MCP 路由和密钥可用状态">
 </p>

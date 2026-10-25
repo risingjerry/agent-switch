@@ -26,6 +26,8 @@
   <img src="https://visitor-badge.laobi.icu/badge?page_id=JNHFlow21.agent-switch&left_text=README%20visits" alt="README visit counter">
 </p>
 
+<p align="center"><img src="docs/demo.gif" width="820" alt="Terminal demo: store a secret from stdin, define one MCP server with agent-switch mcp add, preview per-agent changes with reconcile --dry-run, apply, and check status (synthetic example data)"></p>
+
 <p align="center">
   <img src="docs/assets/agent-switch-dashboard-en.png" width="820" alt="Agent Switch dashboard showing health, configuration drift, MCP routes, and credential availability">
 </p>
