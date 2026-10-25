@@ -223,6 +223,22 @@ Agent Switch 是本地优先工具，但它**不是密码保险库**。
 
 这些是明确限制，不是隐藏功能。计划中的工作记录在[路线图](docs/roadmap.md)中。
 
+## 在 Claude Code / Codex 中使用
+
+安装自带的 Skill，让 Agent 能安全地操作 `agent-switch` CLI（密钥只走 stdin，先预览再应用）：
+
+```bash
+npx skills add risingjerry/agent-switch
+```
+
+也可手动复制：`cp -R skills/agent-switch ~/.claude/skills/`（Claude Code）或 `~/.agents/skills/`（Codex 等兼容 Agent）。示例提示词：
+
+- “运行 agent-switch doctor，告诉我哪些 MCP 有漂移或缺少密钥。”
+- “把我各个 Agent 里已有的 MCP 导入进来，先给我看 dry run。”
+- “通过 agent-switch 给 Codex 和 Claude Code 添加 filesystem MCP，然后 reconcile。”
+
+要修改本仓库？Agent 请阅读 [AGENTS.md](AGENTS.md)。
+
 ## 常用命令
 
 ```bash
@@ -260,6 +276,60 @@ brew upgrade --cask risingjerry/tap/agent-switch
 ```
 
 Agent Switch 不会静默更新自己、第三方 CLI 或 Skill 源。
+
+## 常见问题
+
+### 怎么让 Codex 和 Claude Code 共用同一个 MCP，而不用配置两遍？
+
+用 `agent-switch mcp add` 注册一次，用 `--app` 选择目标应用，再运行 `agent-switch reconcile`。Agent Switch 会在每个 Agent 的原生配置里写入不含密钥的 `agent-*` 条目。
+
+### MCP 的 API Key 应该存在哪里？
+
+存进 Agent Switch 的私有存储，用 `agent-switch secret set --stdin NAME` 写入。值保存在 `~/.config/agent-switch/` 下权限为 0600 的文件里，不会出现在 Agent 配置、Git 或 shell 历史中。
+
+### Agent Switch 是密码管理器吗？
+
+不是。它是给 MCP Wrapper 用的本地优先凭据存储，注入时缺失即失败关闭；它不是密码库，也不依赖硬件保护。详见[密钥与 Wrapper](docs/secrets-and-wrappers.md)。
+
+### 会覆盖我现有的 Codex 或 Claude 配置吗？
+
+不会。它只管理 `agent-*` MCP 条目和带标记的指令块，修改原生文件前会备份；导入已有 MCP 必须先预览，再显式 `--adopt`。
+
+### 支持 Windows 或 Linux 吗？
+
+不支持。Agent Switch 仅支持 macOS 14+，包含原生 App 和 Python CLI。
+
+### Homebrew Cask 为什么会移除 Gatekeeper quarantine？
+
+Alpha 版 App 是临时（ad-hoc）签名，未经 Apple 公证。安装前请先审阅源码和发布校验值；公证已列入[路线图](docs/roadmap.md)。
+
+### 能和 CC Switch 一起用吗？
+
+可以。它保留 CC Switch 的供应商切换，只镜像自己拥有的 MCP 行。详见 [CC Switch 兼容性](docs/ccswitch-compat.md)。
+
+## 卸载
+
+先在 CLI 还在时清理受管状态：
+
+```bash
+agent-switch mcp list                  # 记下每个受管 MCP
+agent-switch mcp remove NAME           # 逐个移除，同时清除其受管投影
+agent-switch reconcile
+```
+
+再卸载软件：
+
+```bash
+brew uninstall --cask risingjerry/tap/agent-switch
+brew list agent-switch-cli && brew uninstall agent-switch-cli   # 仅当 CLI formula 仍存在时
+brew untap risingjerry/tap                                      # 可选
+```
+
+以下内容不会被自动删除（Agent Switch 不会擅自删你的数据）：
+
+- `~/.config/agent-switch/`：包含注册表、`secrets.env`、Wrapper 和备份。确认不再需要其中的凭据后再删：`rm -rf ~/.config/agent-switch`。
+- Agent 指令文件（如 `~/.claude/CLAUDE.md`）中带 `BEGIN AGENT SWITCH MANAGED INSTRUCTIONS` 标记的指令块，需手动删除。
+- 你复制到 `~/.claude/skills/agent-switch` 或 `~/.agents/skills/agent-switch` 的 Skill。
 
 ## 文档
 
@@ -318,3 +388,7 @@ macOS 14。完整测试和隐私门禁见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 ## 许可证
 
 [MIT](LICENSE) © 2026 risingjerry
+
+如果 Agent Switch 帮你省掉了复制粘贴 MCP 配置的麻烦，欢迎在 GitHub 点个 Star。
+
+[![Star History Chart](https://api.star-history.com/svg?repos=risingjerry/agent-switch&type=Date)](https://star-history.com/#risingjerry/agent-switch&Date)

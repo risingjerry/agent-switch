@@ -237,6 +237,22 @@ It does **not** yet provide:
 These are limitations, not hidden features. Planned work lives in the
 [roadmap](docs/roadmap.md).
 
+## Use with Claude Code / Codex
+
+Install the bundled skill so your agent can drive the `agent-switch` CLI safely (secrets by stdin only, preview before apply):
+
+```bash
+npx skills add risingjerry/agent-switch
+```
+
+Manual copy: `cp -R skills/agent-switch ~/.claude/skills/` (Claude Code) or `~/.agents/skills/` (Codex and compatible agents). Example prompts:
+
+- "Run agent-switch doctor and tell me which MCP servers have drifted or are missing secrets."
+- "Import the MCP servers already configured in my agents, show me the dry run first."
+- "Add the filesystem MCP to Codex and Claude Code through agent-switch, then reconcile."
+
+Working on this repo? Agents should read [AGENTS.md](AGENTS.md).
+
 ## Command reference
 
 ```bash
@@ -276,6 +292,60 @@ brew upgrade --cask risingjerry/tap/agent-switch
 
 Agent Switch does not silently update itself, third-party CLIs, or Skill
 sources.
+
+## FAQ
+
+### How do I use the same MCP server in Codex and Claude Code without configuring it twice?
+
+Register it once with `agent-switch mcp add`, choose the target apps with `--app`, then run `agent-switch reconcile`. Agent Switch writes a secret-free `agent-*` entry into each agent's native config.
+
+### Where should I store API keys for MCP servers?
+
+In Agent Switch's private store, written with `agent-switch secret set --stdin NAME`. The values live in a mode-0600 file under `~/.config/agent-switch/`, not in agent configs, Git, or shell history.
+
+### Is Agent Switch a password manager?
+
+No. It is a local-first credential store for MCP wrappers with fail-closed injection, not a vault and not hardware-backed. See [Secrets and wrappers](docs/secrets-and-wrappers.md).
+
+### Will it overwrite my existing Codex or Claude configuration?
+
+No. It manages only `agent-*` MCP entries and marked instruction blocks, backs up native files before changing them, and imports existing MCPs only after a preview and an explicit `--adopt`.
+
+### Does it work on Windows or Linux?
+
+No. Agent Switch is macOS 14+ only, with a native app and a Python CLI.
+
+### Why does the Homebrew Cask remove Gatekeeper quarantine?
+
+The alpha app is ad-hoc signed and not Apple-notarized. Review the source and release checksums first; notarization is on the [roadmap](docs/roadmap.md).
+
+### Does it work with CC Switch?
+
+Yes. It keeps CC Switch provider switching intact and mirrors only the MCP rows it owns. See [CC Switch compatibility](docs/ccswitch-compat.md).
+
+## Uninstall
+
+Clean up managed state first, while the CLI still exists:
+
+```bash
+agent-switch mcp list                  # note each managed MCP
+agent-switch mcp remove NAME           # repeat per MCP; removes its managed projections
+agent-switch reconcile
+```
+
+Then remove the software:
+
+```bash
+brew uninstall --cask risingjerry/tap/agent-switch
+brew list agent-switch-cli && brew uninstall agent-switch-cli   # only if the CLI formula is still installed
+brew untap risingjerry/tap                                      # optional
+```
+
+What remains, because Agent Switch never deletes your data on its own:
+
+- `~/.config/agent-switch/` holds the registry, `secrets.env`, wrappers, and backups. Delete it only after you no longer need the stored credentials: `rm -rf ~/.config/agent-switch`.
+- Marked instruction blocks (`BEGIN AGENT SWITCH MANAGED INSTRUCTIONS` ... `END`) in agent instruction files such as `~/.claude/CLAUDE.md`; delete the block by hand.
+- Skills you copied to `~/.claude/skills/agent-switch` or `~/.agents/skills/agent-switch`.
 
 ## Documentation
 
@@ -336,3 +406,7 @@ and privacy gate.
 ## License
 
 [MIT](LICENSE) © 2026 risingjerry
+
+If Agent Switch saved you from copy-pasting MCP configs, a star on GitHub helps others find it.
+
+[![Star History Chart](https://api.star-history.com/svg?repos=risingjerry/agent-switch&type=Date)](https://star-history.com/#risingjerry/agent-switch&Date)

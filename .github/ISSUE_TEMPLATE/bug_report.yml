@@ -1,0 +1,33 @@
+name: Bug report
+description: Something in Agent Switch does not work
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Never paste secret values. `agent-switch` output lists secret names only; check before sending.
+  - type: textarea
+    id: happened
+    attributes:
+      label: What happened
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: Output of `agent-switch --version` and `agent-switch doctor --json` (or the failing command). Remove personal paths and tokens.
+      render: shell
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+  - type: input
+    id: agents
+    attributes:
+      label: Agents involved (Codex, Claude Code, Claude Desktop, Hermes) and versions

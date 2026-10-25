@@ -43,7 +43,7 @@ class LocalizationCatalogTests(unittest.TestCase):
         for readme in ("README.md", "README.zh-CN.md"):
             content = (ROOT / readme).read_text()
             self.assertIn(chart, content)
-            self.assertNotIn("api.star-history.com", content)
+            self.assertIn("api.star-history.com/svg?repos=risingjerry/agent-switch", content)
 
     def test_activity_chart_stays_near_the_end_after_product_documentation(self) -> None:
         english = (ROOT / "README.md").read_text()
