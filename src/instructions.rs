@@ -19,10 +19,17 @@ fn find_block(text: &str) -> Option<(usize, usize)> {
     })
 }
 
+/// Skill Hub root: `$SKILL_HUB_HOME`, else `skillHub` in config.json, else
+/// `skill-hub` next to the config.
 pub fn skill_hub_dir(paths: &Paths) -> PathBuf {
+    let configured = || {
+        let text = std::fs::read_to_string(&paths.config_file).ok()?;
+        let value: serde_json::Value = serde_json::from_str(&text).ok()?;
+        value.get("skillHub")?.as_str().map(crate::util::expand_user)
+    };
     let hub = match std::env::var("SKILL_HUB_HOME") {
         Ok(v) if !v.is_empty() => crate::util::expand_user(&v),
-        _ => paths.user_home.join("AgentWorkspace").join("skill-hub"),
+        _ => configured().unwrap_or_else(|| paths.agent_home.join("skill-hub")),
     };
     resolve_lenient(&hub)
 }

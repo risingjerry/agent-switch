@@ -111,14 +111,32 @@ pub const DESCRIBED: usize = 30;
 /// First sentence of a description, at most 110 characters.
 pub fn one_line(description: &str) -> String {
     let flat = description.split_whitespace().collect::<Vec<_>>().join(" ");
-    let end = flat.find(|c| matches!(c, '。' | '；' | ';')).map(|i| i + 3).unwrap_or(flat.len());
+    let end = flat.find(['。', '；', ';']).map(|i| i + 3).unwrap_or(flat.len());
     let end = flat.find(". ").map_or(end, |i| end.min(i + 1));
     flat[..end.min(flat.len())].trim_end_matches(['；', ';']).chars().take(110).collect()
 }
 
 /// The on-demand Skills used most in the last 90 days (at least twice),
 /// with a one-line description each, most used first.
+/// The choice is kept for a week so agents' lists (and `status`) do not
+/// change with every session.
 pub fn often_used(paths: &Paths, hub_root: &Path) -> Vec<(String, String)> {
+    let cache = paths.cache_dir.join("often-used.json");
+    let fresh = fs::metadata(&cache)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| SystemTime::now().duration_since(t).ok())
+        .is_some_and(|age| age < Duration::from_secs(7 * 86_400));
+    if fresh && let Some(rows) = fs::read_to_string(&cache).ok().and_then(|t| serde_json::from_str(&t).ok()) {
+        return rows;
+    }
+    let rows = compute_often_used(paths, hub_root);
+    crate::util::ensure_private_dir(&paths.cache_dir);
+    let _ = fs::write(&cache, json!(rows).to_string()); // refreshes the week
+    rows
+}
+
+fn compute_often_used(paths: &Paths, hub_root: &Path) -> Vec<(String, String)> {
     let Ok(stats) = usage::collect(paths, 90) else { return Vec::new() };
     let mut seen = BTreeSet::new();
     let mut rows: Vec<(usize, String, String)> = skills::catalog(hub_root)
@@ -169,7 +187,11 @@ pub struct Finder {
 }
 
 fn mtime(p: &Path) -> u128 {
-    fs::metadata(p).and_then(|m| m.modified()).ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map_or(0, |d| d.as_nanos())
+    fs::metadata(p)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map_or(0, |d| d.as_nanos())
 }
 
 fn build(paths: &Paths, hub_root: &Path, config: &Config) -> Vec<Item> {

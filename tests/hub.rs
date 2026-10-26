@@ -116,8 +116,7 @@ fn large_servers_are_not_listed_tool_by_tool() {
     // Starting it returns names and one-line summaries, not 41 schemas.
     hub.send(json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
         "params": {"name": "fusebox_servers", "arguments": {"server": "fake"}}}));
-    let text: Value =
-        serde_json::from_str(hub.response(2)["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    let text: Value = serde_json::from_str(hub.response(2)["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
     let tools = text["tools"].as_array().unwrap();
     assert_eq!(tools.len(), 41);
     assert_eq!(tools[1], json!({"name": "tool_0", "description": "Extra 0"}));

@@ -1,53 +1,27 @@
 #!/bin/zsh
+# Build and install Fusebox from this checkout: the CLI into ~/.local/bin and
+# (on macOS with Xcode) the app into ~/Applications. Existing files are moved
+# to a timestamped backup first.
 set -euo pipefail
 
 ROOT="${0:A:h:h}"
+BIN_DIR="${FUSEBOX_BIN_DIR:-$HOME/.local/bin}"
+fail() { print -u2 "Fusebox install failed: $*"; exit 1; }
 
-fail() {
-  print -u2 "Agent Switch install failed: $*"
-  exit 1
-}
-
-[[ "$(uname -s)" == "Darwin" ]] || fail "macOS is required."
-command -v python3 >/dev/null 2>&1 || fail "Python 3.11 or newer is required."
-command -v pipx >/dev/null 2>&1 || fail "pipx is required. Install it with: brew install pipx"
-command -v xcodebuild >/dev/null 2>&1 || fail "Full Xcode with xcodebuild is required."
-
-python3 - <<'PY' || fail "Python 3.11 or newer is required."
-import sys
-
-raise SystemExit(sys.version_info < (3, 11))
-PY
-
-xcodebuild -version >/dev/null 2>&1 || fail "Select a full Xcode installation with xcode-select."
-
-print "Installing Agent Switch CLI..."
-if ! pipx install --force "$ROOT"; then
-  print "The existing pipx environment could not be refreshed; recreating it..."
-  pipx uninstall agent-switch >/dev/null 2>&1 || true
-  pipx install "$ROOT"
+command -v cargo >/dev/null 2>&1 || fail "Rust is required: https://rustup.rs"
+cargo build --release --locked --manifest-path "$ROOT/Cargo.toml"
+mkdir -p "$BIN_DIR"
+if [[ -e "$BIN_DIR/fusebox" && ! -L "$BIN_DIR/fusebox" ]]; then
+  mv "$BIN_DIR/fusebox" "$BIN_DIR/fusebox.backup-$(date +%Y%m%d%H%M%S)"
 fi
+# Replace rather than overwrite in place: macOS kills a re-signed binary
+# copied over a running one.
+rm -f "$BIN_DIR/fusebox"
+cp "$ROOT/target/release/fusebox" "$BIN_DIR/fusebox"
+"$BIN_DIR/fusebox" --version
+[[ ":$PATH:" == *":$BIN_DIR:"* ]] || print "Add $BIN_DIR to PATH to run fusebox."
 
-PIPX_BIN_DIR="$(pipx environment --value PIPX_BIN_DIR)"
-CLI="$PIPX_BIN_DIR/agent-switch"
-[[ -x "$CLI" ]] || fail "pipx installed the package but the agent-switch executable was not found."
-"$CLI" --version
-
-print "Building and installing the native macOS app..."
-"$ROOT/macos-app/AgentSwitch/install.sh"
-
-"$CLI" write-default-config
-
-cat <<EOF
-
-Agent Switch is installed.
-
-App: ~/Applications/Agent Switch.app
-CLI: $CLI
-
-Next:
-  agent-switch mcp import --dry-run --json
-  agent-switch doctor
-
-Review the import preview before adopting existing MCPs or reconciling native configs.
-EOF
+if [[ "$(uname -s)" == "Darwin" ]] && xcodebuild -version >/dev/null 2>&1; then
+  "$ROOT/macos-app/AgentSwitch/install.sh"
+fi
+print "Next: fusebox doctor"

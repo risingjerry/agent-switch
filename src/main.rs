@@ -49,6 +49,9 @@ const VALUE_OPTS: &[&str] = &[
     "days",
     "profile",
     "output",
+    "git",
+    "ref",
+    "skill-path",
 ];
 
 #[derive(Default)]
@@ -164,6 +167,7 @@ Usage: fusebox [--home DIR] [--user-home DIR] [--config FILE] <command>
   skills status|fetch|promote|enable|disable|sync|sync-global|update
   skills usage [--days 60] [--json]     what each agent actually used
   skills prune [--days 60] [--profile global] [--apply]
+  skills add-source ID --git URL [--ref R] | --path DIR [--skill-path P]
   skills drop|restore NAME...          take Skills out of the catalog / put them back (files kept)
   find WORDS [--json]                  one catalog: on-demand Skills and MCP servers for a task
   eval [--days 60] [--json]            score find on prompt→Skill pairs from past sessions
@@ -687,12 +691,35 @@ fn cmd_skills(ctx: &Ctx, a: &Args) -> Result<i32> {
             }
         }
         // Resident only in --to (taken off --from, default global).
+        "add-source" => {
+            a.check(&["git", "ref", "path", "skill-path"])?;
+            let id = a.pos(1, "ID")?;
+            let skill_path = a.one("skill-path").unwrap_or(".");
+            let spec = match (a.one("git"), a.one("path")) {
+                (Some(url), None) => json!({"type": "git", "url": url, "ref": a.one("ref").unwrap_or("main"),
+                    "checkout": format!("vendor/{id}"), "skillPath": skill_path}),
+                (None, Some(dir)) => json!({"type": "local", "path": util::expand_user(dir).to_string_lossy(),
+                    "skillPath": skill_path}),
+                _ => {
+                    return Err(
+                        "usage: fusebox skills add-source ID (--git URL [--ref REF] | --path DIR) [--skill-path P]"
+                            .into(),
+                    );
+                }
+            };
+            skills::add_source(&ctx.hub()?, id, spec.clone())?;
+            if spec["type"] == "git" {
+                print(&format!("added {id}; run `fusebox skills fetch {id}` to clone it\n"));
+            } else {
+                print(&format!("added {id}; its Skills are on demand now (`fusebox skills`)\n"));
+            }
+        }
         // Out of the catalog (not resident, not on demand); files are kept.
         "drop" | "restore" => {
             a.check(&["source"])?;
             let names = &a.pos[1..];
             if names.is_empty() {
-                return Err(format!("usage: fusebox skills {sub} NAME... [--source S]").into());
+                return Err(format!("usage: fusebox skills {sub} NAME... [--source S]"));
             }
             let hub = ctx.hub()?;
             let catalog = skills::catalog(&ctx.hub_root())?;
@@ -706,8 +733,7 @@ fn cmd_skills(ctx: &Ctx, a: &Args) -> Result<i32> {
                             return Err(format!(
                                 "{name} is resident in {}; make it on demand first",
                                 entry.profiles.join(", ")
-                            )
-                            .into());
+                            ));
                         }
                         entry.id.split_once(':').map(|(s, _)| s.to_string()).unwrap_or_default()
                     }
@@ -1501,16 +1527,27 @@ fn cmd_eval(ctx: &Ctx, a: &Args) -> Result<i32> {
         "{} prompt→Skill pairs from the last {days} days ({} Skills)\n\
          with usage prior: top-1 {}%{}  top-5 {}%{}\n\
          text only:        top-1 {}%{}  top-5 {}%{}\n",
-        report["pairs"], report["skills"],
-        report["top1"], delta("top1"), report["top5"], delta("top5"),
-        report["textTop1"], delta("textTop1"), report["textTop5"], delta("textTop5"),
+        report["pairs"],
+        report["skills"],
+        report["top1"],
+        delta("top1"),
+        report["top5"],
+        delta("top5"),
+        report["textTop1"],
+        delta("textTop1"),
+        report["textTop5"],
+        delta("textTop5"),
     ));
     let misses = report["misses"].as_array().cloned().unwrap_or_default();
     if !misses.is_empty() {
         print(&format!("\nmissed ({}):\n", misses.len()));
         for m in misses.iter().take(15) {
-            print(&format!("  {} ← \"{}\" (got {})\n", m["skill"].as_str().unwrap_or(""),
-                m["query"].as_str().unwrap_or(""), m["got"]));
+            print(&format!(
+                "  {} ← \"{}\" (got {})\n",
+                m["skill"].as_str().unwrap_or(""),
+                m["query"].as_str().unwrap_or(""),
+                m["got"]
+            ));
         }
     }
     Ok(0)
@@ -1565,6 +1602,9 @@ mod tests {
         let u = usage::SkillUse { times, ..Default::default() };
         assert_eq!(drop_off(&u, &since), None);
         // Too recent to judge.
-        assert_eq!(drop_off(&usage::SkillUse { times: busy(8, 4), ..Default::default() }, &usage::date_of(now - 2 * 86_400)), None);
+        assert_eq!(
+            drop_off(&usage::SkillUse { times: busy(8, 4), ..Default::default() }, &usage::date_of(now - 2 * 86_400)),
+            None
+        );
     }
 }

@@ -41,6 +41,13 @@ impl Hub {
     pub fn load(root: &Path) -> Result<Hub> {
         let root = resolve_lenient(root);
         let registry_path = root.join("config").join("registry.json");
+        if !registry_path.exists() && !root.exists() {
+            // First run: an empty hub, ready for `fusebox skills add-source`.
+            fs::create_dir_all(root.join("config")).map_err(|e| e.to_string())?;
+            fs::create_dir_all(root.join("profiles")).map_err(|e| e.to_string())?;
+            write_json(&registry_path, &json!({"version": 1, "sources": {}}))?;
+            write_json(&root.join("profiles").join("global.json"), &json!({"skills": []}))?;
+        }
         if !registry_path.exists() {
             return Err(format!("missing registry: {}", registry_path.display()));
         }
@@ -560,6 +567,20 @@ pub fn promote(hub: &Hub, source: &str, reference: &str) -> Result<()> {
     write_json(&path, &Value::Object(registry))
 }
 
+/// Register a Skill source: a git repository (cloned into `vendor/ID` by
+/// `skills fetch`) or a local directory.
+pub fn add_source(hub: &Hub, id: &str, spec: Value) -> Result<()> {
+    let path = hub.root.join("config").join("registry.json");
+    let mut registry = read_json_object(&path)?;
+    let sources = registry.entry("sources").or_insert_with(|| json!({}));
+    let sources = sources.as_object_mut().ok_or("registry sources is not an object")?;
+    if sources.contains_key(id) {
+        return Err(format!("source {id} already exists"));
+    }
+    sources.insert(id.to_string(), spec);
+    write_json(&path, &Value::Object(registry))
+}
+
 /// Take Skills out of a source's catalog (`excluded = true`) or put them
 /// back. Files stay on disk. Returns the names that changed.
 pub fn set_excluded(hub: &Hub, source: &str, names: &[String], excluded: bool) -> Result<Vec<String>> {
@@ -578,11 +599,8 @@ pub fn set_excluded(hub: &Hub, source: &str, names: &[String], excluded: bool) -
         .flatten()
         .filter_map(|v| v.as_str().map(String::from))
         .collect();
-    let changed: Vec<String> = names
-        .iter()
-        .filter(|n| if excluded { list.insert((*n).clone()) } else { list.remove(*n) })
-        .cloned()
-        .collect();
+    let changed: Vec<String> =
+        names.iter().filter(|n| if excluded { list.insert((*n).clone()) } else { list.remove(*n) }).cloned().collect();
     if list.is_empty() {
         src.remove("exclude");
     } else {
@@ -594,9 +612,9 @@ pub fn set_excluded(hub: &Hub, source: &str, names: &[String], excluded: bool) -
 
 /// Source that excludes `name`, if any.
 pub fn excluded_in(hub: &Hub, name: &str) -> Option<String> {
-    hub.sources().into_iter().find_map(|(id, spec)| {
-        spec.get("exclude")?.as_array()?.iter().any(|v| v.as_str() == Some(name)).then_some(id)
-    })
+    hub.sources()
+        .into_iter()
+        .find_map(|(id, spec)| spec.get("exclude")?.as_array()?.iter().any(|v| v.as_str() == Some(name)).then_some(id))
 }
 
 // ---- status / report ----

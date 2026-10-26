@@ -16,7 +16,7 @@ Fusebox is the single place this machine keeps agent secrets, MCP servers and Sk
 Everything is **on demand** unless the user explicitly asked for it to be resident.
 
 - **Resident**: loaded into every session (globally, or only in one project). For a Skill: in your skill list. For an MCP: started with the session.
-- **On demand**: costs nothing until needed, but always reachable.
+- **On demand**: costs nothing until needed, but always reachable. Agents see every on-demand name; the 30 most used also show a one-line description.
   - Skill → `fusebox skills search WORDS`, then `fusebox skills show NAME` and follow it.
   - MCP → the `agent-hub` MCP: `fusebox_servers` lists them (pass `server` to start one and see its tools), `fusebox_call` calls a tool.
 
@@ -45,6 +45,9 @@ Everything is **on demand** unless the user explicitly asked for it to be reside
 - Which agents get an MCP: `fusebox mcp set ID --command ... --app claude --app codex --app deepseek ...` (repeat `--app`; omitting all means every agent).
 - Skills (sync happens automatically): resident with `fusebox skills enable PROFILE NAME...`, on demand with `fusebox skills disable PROFILE NAME...`, resident only in one project with `fusebox skills move NAME --to PROJECT`. PROFILE is `global` or a project profile (`fusebox skills status` lists them). Files are never deleted.
 - Profiles may pin skills in their `keep` list; `advise` never suggests moving those.
+- Take a Skill out of the catalog entirely (files kept): `fusebox skills drop NAME...`; undo with `fusebox skills restore NAME...`. Only when the user asks.
+- A Skill agents keep missing: add the words people use for it to the hub's `config/aliases.json` (`{"name": "phrase / 说法 / ..."}`); `find` and `skills search` match them.
+- After changing aliases, descriptions or the catalog, run `fusebox eval`: it scores `find` on real prompt→Skill pairs from past sessions and shows the change since the last run.
 - Always finish MCP changes with `fusebox reconcile`.
 
 ## Secrets — hard rules

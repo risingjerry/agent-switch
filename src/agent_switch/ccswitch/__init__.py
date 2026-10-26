@@ -1,2 +1,0 @@
-"""CC Switch compatibility adapters."""
-

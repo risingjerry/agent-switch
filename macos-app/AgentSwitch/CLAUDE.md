@@ -1,12 +1,12 @@
-# Agent Switch macOS App — CLAUDE.md
+# Fusebox macOS App — CLAUDE.md
 
 ## Architecture
 
-Native SwiftUI app (macOS 14+). All data comes from the Rust `agent-switch`
+Native SwiftUI app (macOS 14+). All data comes from the Rust `fusebox`
 binary: `AgentSwitchService` runs it with `--json` and decodes the output into
 `Models/AgentModels.swift`. The app never reads or writes secrets itself;
 `secret set` goes through stdin and `secret get` through a private FIFO bound
-to fd 3. Every write is followed by `agent-switch reconcile`.
+to fd 3. Every write is followed by `fusebox reconcile`.
 
 UI text is bilingual: `Resources/L10n.swift` holds every string as
 `t("English", "中文")`. The language follows macOS on first launch and can be

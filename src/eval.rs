@@ -27,7 +27,12 @@ fn user_text(msg: &Value) -> String {
             if parts.iter().any(|p| p["type"] == "tool_result") {
                 return String::new();
             }
-            parts.iter().filter(|p| p["type"] == "text").filter_map(|p| p["text"].as_str()).collect::<Vec<_>>().join(" ")
+            parts
+                .iter()
+                .filter(|p| p["type"] == "text")
+                .filter_map(|p| p["text"].as_str())
+                .collect::<Vec<_>>()
+                .join(" ")
         }
         _ => String::new(),
     }
@@ -59,7 +64,8 @@ pub fn mine(paths: &Paths, days: u64) -> Vec<Pair> {
                 Some("user") => {
                     let text = user_text(&msg);
                     let text = text.trim();
-                    if text.chars().count() > 4 && !["<", "# ", "[Earlier", "Base directory for this skill"].iter().any(|p| text.starts_with(p))
+                    if text.chars().count() > 4
+                        && !["<", "# ", "[Earlier", "Base directory for this skill"].iter().any(|p| text.starts_with(p))
                     {
                         last = Some(text.chars().take(400).collect());
                     }
@@ -99,7 +105,10 @@ pub fn run(paths: &Paths, finder: &Finder, catalog: &BTreeSet<String>, days: u64
     let mut misses = Vec::new();
     for p in &pairs {
         let skills = |hits: Vec<Value>| -> Vec<String> {
-            hits.into_iter().filter(|h| h["kind"] == "skill").filter_map(|h| h["name"].as_str().map(String::from)).collect()
+            hits.into_iter()
+                .filter(|h| h["kind"] == "skill")
+                .filter_map(|h| h["name"].as_str().map(String::from))
+                .collect()
         };
         let root = project_root(Path::new(&p.cwd));
         let ranked = skills(finder.hits(&p.query, Some(&root), 8));

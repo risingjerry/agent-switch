@@ -20,6 +20,8 @@ actor AgentSwitchService {
             "/usr/local/bin/fusebox",
             home + "/.cargo/bin/fusebox",
             home + "/.local/bin/agent-switch",
+            // Release builds ship the CLI inside the app.
+            Bundle.main.path(forResource: "fusebox", ofType: nil),
         ].compactMap { $0 }
         guard let path = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else {
             throw ServiceError.binaryNotFound
