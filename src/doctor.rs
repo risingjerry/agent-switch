@@ -34,6 +34,9 @@ pub fn detected_apps(paths: &Paths) -> Vec<&'static str> {
     {
         out.push("hermes");
     }
+    if paths.dsh_home.exists() || cmd("dsh") {
+        out.push("deepseek");
+    }
     if paths.claude_desktop_config.exists()
         || paths.user_home.join("Applications").join("Claude.app").exists()
         || (real && Path::new("/Applications/Claude.app").exists())
@@ -199,12 +202,13 @@ fn in_sync(app: &str, current: &str, desired: &Desired) -> bool {
 }
 type Target = (&'static str, fn(&Paths) -> &Path, Renderer);
 
-fn targets() -> [Target; 4] {
+fn targets() -> [Target; 5] {
     [
         ("claude", |p| &p.claude_config, |t, d, _| render::json_config(t, d)),
         ("claude_desktop", |p| &p.claude_desktop_config, |t, d, _| render::json_config(t, d)),
         ("codex", |p| &p.codex_config, |t, d, p| render::codex_config(t, d, Some(&p.codex_instructions))),
         ("hermes", |p| &p.hermes_config, |t, d, _| Ok(render::hermes_config(t, d))),
+        ("deepseek", |p| &p.dsh_patch, |t, d, _| render::dsh_patch(t, d)),
     ]
 }
 

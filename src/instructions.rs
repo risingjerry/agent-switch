@@ -79,6 +79,14 @@ Hermes-specific rule:
 "
 }
 
+pub fn deepseek(paths: &Paths) -> String {
+    core_policy(paths)
+        + "
+DeepSeek Harness-specific rule:
+- MCP servers reach dsh through the Fusebox block in `~/.dsh/cordis.patch.yml`; do not edit that block by hand, use `fusebox mcp ...` and `fusebox reconcile`.
+"
+}
+
 pub fn merge_managed_block(current: &str, body: &str) -> String {
     let block = format!("{MANAGED_START}\n{}\n{MANAGED_END}\n", body.trim_end());
     if let Some((start, end)) = find_block(current) {
@@ -121,6 +129,15 @@ pub fn targets(paths: &Paths, apps: &[&str]) -> Result<Vec<Target>> {
             "instructions.claude_global",
             paths.claude_global_instructions.clone(),
             merge_managed_block(&current, &claude(paths)),
+            None,
+        ));
+    }
+    if has("deepseek") {
+        let current = read_text(&paths.dsh_instructions)?;
+        out.push((
+            "instructions.deepseek",
+            paths.dsh_instructions.clone(),
+            merge_managed_block(&current, &deepseek(paths)),
             None,
         ));
     }

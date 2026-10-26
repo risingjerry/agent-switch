@@ -11,7 +11,7 @@ use serde_json::{Map, Value, json};
 
 use crate::util::{Result, WriteResult, expand_user, json_pretty, write_if_changed};
 
-pub const APP_NAMES: [&str; 4] = ["claude", "claude_desktop", "codex", "hermes"];
+pub const APP_NAMES: [&str; 5] = ["claude", "claude_desktop", "codex", "hermes", "deepseek"];
 
 pub static ENV_NAME_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*$").unwrap());
 pub static SECRET_NAME_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[A-Z][A-Z0-9_]*$").unwrap());
@@ -35,17 +35,19 @@ pub struct Apps {
     pub claude_desktop: bool,
     pub codex: bool,
     pub hermes: bool,
+    /// DeepSeek Harness (`dsh`).
+    pub deepseek: bool,
 }
 
 impl Default for Apps {
     fn default() -> Self {
-        Apps { claude: true, claude_desktop: true, codex: true, hermes: true }
+        Apps { claude: true, claude_desktop: true, codex: true, hermes: true, deepseek: true }
     }
 }
 
 impl Apps {
     pub fn none() -> Apps {
-        Apps { claude: false, claude_desktop: false, codex: false, hermes: false }
+        Apps { claude: false, claude_desktop: false, codex: false, hermes: false, deepseek: false }
     }
     pub fn get(&self, app: &str) -> bool {
         match app {
@@ -53,6 +55,7 @@ impl Apps {
             "claude_desktop" => self.claude_desktop,
             "codex" => self.codex,
             "hermes" => self.hermes,
+            "deepseek" => self.deepseek,
             _ => false,
         }
     }
@@ -62,6 +65,7 @@ impl Apps {
             "claude_desktop" => self.claude_desktop = on,
             "codex" => self.codex = on,
             "hermes" => self.hermes = on,
+            "deepseek" => self.deepseek = on,
             _ => {}
         }
     }
@@ -75,11 +79,16 @@ impl Apps {
                     apps.set(name, truthy(v));
                 }
             }
+            // DeepSeek Harness was added later: tools configured before it
+            // existed stay off there until enabled explicitly.
+            if !map.contains_key("deepseek") {
+                apps.deepseek = false;
+            }
         }
         apps
     }
     pub fn to_value(self) -> Value {
-        json!({"claude": self.claude, "claude_desktop": self.claude_desktop, "codex": self.codex, "hermes": self.hermes})
+        json!({"claude": self.claude, "claude_desktop": self.claude_desktop, "codex": self.codex, "hermes": self.hermes, "deepseek": self.deepseek})
     }
     pub fn enabled_names(&self) -> Vec<&'static str> {
         APP_NAMES.iter().copied().filter(|n| self.get(n)).collect()

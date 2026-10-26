@@ -29,13 +29,20 @@ struct ToolsView: View {
                 }
             } else {
                 List(selection: $selection) {
-                    Section {
-                        ForEach(rows) { server in
-                            MCPRow(server: server, missing: Set(state.missingSecrets))
-                                .tag(server.id)
+                    ForEach([MCPMode.direct, .hub, .off], id: \.self) { mode in
+                        let items = rows.filter { $0.effectiveMode == mode }
+                        if !items.isEmpty {
+                            Section {
+                                ForEach(items) { server in
+                                    MCPRow(server: server, missing: Set(state.missingSecrets)).tag(server.id)
+                                }
+                            } header: {
+                                Text("\(mode.title) · \(items.count)")
+                            }
                         }
-                    } footer: {
-                        Text(L10n.modeHelp).font(.callout).foregroundStyle(.secondary).padding(.top, DS.gap)
+                    }
+                    Section {} footer: {
+                        Text(L10n.modeHelp).font(.callout).foregroundStyle(.secondary)
                     }
                 }
                 .listStyle(.inset)
@@ -68,48 +75,90 @@ struct ToolsView: View {
     }
 }
 
+extension MCPMode {
+    var title: String {
+        switch self {
+        case .off: L10n.modeOff
+        case .direct: L10n.modeDirect
+        case .hub: L10n.modeHub
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .off: Color.secondary.opacity(0.5)
+        case .direct: DS.good
+        case .hub: DS.hub
+        }
+    }
+}
+
 private struct MCPRow: View {
     @Environment(AppState.self) private var state
     let server: MCPServer
     let missing: Set<String>
 
+    /// One readable line instead of the raw command: description, or the
+    /// executable plus the first script/URL it runs.
+    private var summary: String {
+        if let d = server.description, !d.isEmpty, !d.hasPrefix("Imported from") { return d }
+        let exe = (server.command as NSString).lastPathComponent
+        let target = server.args.first { $0.contains("/") || $0.contains(".") }.map { arg -> String in
+            if let url = URL(string: arg), let host = url.host { return host }
+            return (arg as NSString).lastPathComponent
+        }
+        return [exe, target].compactMap { $0 }.joined(separator: " · ")
+    }
+
     var body: some View {
-        HStack(spacing: DS.pad) {
-            VStack(alignment: .leading, spacing: 3) {
+        let mode = server.effectiveMode
+        let lacking = server.requiredSecrets.filter { missing.contains($0) }
+        HStack(spacing: 12) {
+            Text(String(server.name.prefix(1)).uppercased())
+                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                .frame(width: 30, height: 30)
+                .foregroundStyle(mode == .off ? Color.secondary : Color.primary)
+                .background(mode.color.opacity(0.18), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
-                    Text(server.name).font(.body.weight(.medium))
-                    if let n = server.toolCount {
-                        Chip(text: "\(n) \(L10n.tools)")
-                    }
-                    let lacking = server.requiredSecrets.filter { missing.contains($0) }
+                    Text(server.name).font(.body.weight(.medium)).lineLimit(1)
                     if !lacking.isEmpty {
-                        Chip(text: "\(L10n.missing): \(lacking.joined(separator: ", "))", tint: DS.bad)
+                        Image(systemName: "exclamationmark.circle.fill")
+                            .foregroundStyle(DS.bad)
+                            .help("\(L10n.missing): \(lacking.joined(separator: ", "))")
                     }
                 }
-                Text(([server.command] + server.args).joined(separator: " "))
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                HStack(spacing: 4) {
-                    ForEach(server.apps.names, id: \.self) { Chip(text: AppNames.short($0)) }
-                }
+                Text(summary).font(.callout).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
             }
             Spacer(minLength: DS.pad)
-            Picker("", selection: Binding(get: { server.effectiveMode }, set: { mode in
-                Task { await state.setMode(server, mode) }
-            })) {
-                Text(L10n.modeOff).tag(MCPMode.off)
-                Text(L10n.modeDirect).tag(MCPMode.direct)
-                Text(L10n.modeHub).tag(MCPMode.hub)
+            Text(server.apps.names.map(AppNames.short).joined(separator: " · "))
+                .font(.caption).foregroundStyle(.tertiary).lineLimit(1)
+            if let n = server.toolCount {
+                Text("\(n) \(L10n.tools)").font(.caption).foregroundStyle(.tertiary).monospacedDigit()
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+            Menu {
+                Picker(L10n.apps, selection: Binding(get: { mode }, set: { next in
+                    Task { await state.setMode(server, next) }
+                })) {
+                    ForEach([MCPMode.direct, .hub, .off], id: \.self) { m in
+                        Text(m.title).tag(m)
+                    }
+                }
+                .pickerStyle(.inline)
+            } label: {
+                HStack(spacing: 6) {
+                    Circle().fill(mode.color).frame(width: 7, height: 7)
+                    Text(mode.title).font(.callout)
+                }
+            }
+            .menuStyle(.borderlessButton)
             .fixedSize()
+            .frame(minWidth: 96, alignment: .trailing)
             .disabled(state.syncing)
         }
-        .padding(.vertical, 4)
-        .opacity(server.enabled ? 1 : 0.6)
+        .padding(.vertical, 5)
+        .opacity(mode == .off ? 0.7 : 1)
+        .help(([server.command] + server.args).joined(separator: " "))
     }
 }
 
@@ -154,6 +203,7 @@ private struct MCPEditor: View {
                 Toggle("Claude Desktop", isOn: $draft.apps.claude_desktop)
                 Toggle("Codex", isOn: $draft.apps.codex)
                 Toggle("Hermes", isOn: $draft.apps.hermes)
+                Toggle("DeepSeek Harness", isOn: $draft.apps.deepseek)
             }
             Section {
                 HStack {

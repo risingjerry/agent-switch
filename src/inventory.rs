@@ -46,6 +46,14 @@ pub fn agents(config: &Config, paths: &Paths) -> Result<Vec<Value>> {
             &paths.hermes_soul,
             &["hermes", "instructions.hermes", "instructions.hermes_soul"][..],
         ),
+        (
+            "deepseek",
+            "DeepSeek Harness",
+            contains_managed_block(&paths.dsh_instructions),
+            &paths.dsh_patch,
+            &paths.dsh_instructions,
+            &["deepseek", "instructions.deepseek"][..],
+        ),
     ];
     Ok(defs
         .into_iter()
@@ -65,7 +73,7 @@ pub fn agents(config: &Config, paths: &Paths) -> Result<Vec<Value>> {
         .collect())
 }
 
-const CLI_TARGETS: [(&str, &str, &str); 15] = [
+const CLI_TARGETS: [(&str, &str, &str); 16] = [
     ("fusebox", "Fusebox", "Homebrew / cargo"),
     ("codex", "Codex", "npm / app"),
     ("claude", "Claude Code", "native installer"),
@@ -81,6 +89,7 @@ const CLI_TARGETS: [(&str, &str, &str); 15] = [
     ("bun", "Bun", "standalone"),
     ("rustup", "Rustup", "standalone"),
     ("yt-dlp", "yt-dlp", "Homebrew / pipx"),
+    ("dsh", "DeepSeek Harness", "app bundle"),
 ];
 
 fn version_of(path: &str) -> Option<String> {

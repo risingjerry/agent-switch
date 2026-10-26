@@ -7,6 +7,8 @@ import SwiftUI
 
 struct ContentView: View {
     @Environment(AppState.self) private var state
+    @AppStorage(L10n.languageKey) private var language = "system"
+
     var body: some View {
         @Bindable var state = state
         NavigationSplitView {
@@ -31,6 +33,7 @@ struct ContentView: View {
                     }
                 }
         }
+        .id(language)
         .task { await state.refresh() }
         .alert(
             L10n.t("Something went wrong", "出错了"),

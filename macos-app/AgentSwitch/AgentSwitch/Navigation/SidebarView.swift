@@ -55,6 +55,15 @@ struct SidebarView: View {
     }
 
     private var footer: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            LanguageMenu()
+            health
+        }
+        .padding(.horizontal, DS.pad)
+        .padding(.vertical, 12)
+    }
+
+    private var health: some View {
         HStack(spacing: DS.gap) {
             StatusDot(color: state.doctor == nil ? DS.quiet : (state.doctor!.blocked ? DS.bad : (state.needsSync ? DS.warn : DS.good)))
             Text(statusText).font(.callout).foregroundStyle(.secondary).lineLimit(1)
@@ -63,8 +72,6 @@ struct SidebarView: View {
                 ProgressView().controlSize(.small)
             }
         }
-        .padding(.horizontal, DS.pad)
-        .padding(.vertical, 12)
     }
 
     private var statusText: String {

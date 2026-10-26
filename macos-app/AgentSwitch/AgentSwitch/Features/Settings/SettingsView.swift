@@ -19,10 +19,9 @@ struct SettingsView: View {
                     Text("中文").tag("zh")
                     Text("English").tag("en")
                 }
-                Text(L10n.restartHint).font(.caption).foregroundStyle(.secondary)
             }
             Section {
-                TextField(L10n.cliPath, text: $cliPath, prompt: Text("~/.local/bin/agent-switch"))
+                TextField(L10n.cliPath, text: $cliPath, prompt: Text("~/.local/bin/fusebox"))
                     .font(DS.mono)
                 Text(L10n.cliPathHint).font(.caption).foregroundStyle(.secondary)
             }
@@ -36,6 +35,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .id(language)
         .frame(width: 460)
         .fixedSize(horizontal: false, vertical: true)
     }

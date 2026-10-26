@@ -87,6 +87,28 @@ extension PageHeader where Trailing == EmptyView {
     }
 }
 
+/// Globe menu that switches the UI language live (system / 中文 / English).
+struct LanguageMenu: View {
+    @AppStorage(L10n.languageKey) private var language = "system"
+
+    var body: some View {
+        Menu {
+            Picker(L10n.language, selection: $language) {
+                Text(L10n.followSystem).tag("system")
+                Text("中文").tag("zh")
+                Text("English").tag("en")
+            }
+            .pickerStyle(.inline)
+        } label: {
+            Label(L10n.chinese ? "中文" : "English", systemImage: "globe")
+                .font(.callout)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help(L10n.language)
+    }
+}
+
 /// Pretty agent names for app ids used by the CLI.
 enum AppNames {
     static func label(_ id: String) -> String {
@@ -95,6 +117,7 @@ enum AppNames {
         case "claude_desktop": return "Claude Desktop"
         case "codex": return "Codex"
         case "hermes": return "Hermes"
+        case "deepseek": return "DeepSeek Harness"
         default: return id
         }
     }
@@ -105,6 +128,7 @@ enum AppNames {
         case "claude_desktop": return "Desktop"
         case "codex": return "Codex"
         case "hermes": return "Hermes"
+        case "deepseek": return "DeepSeek"
         default: return id
         }
     }

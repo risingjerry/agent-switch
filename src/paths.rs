@@ -20,6 +20,11 @@ pub struct Paths {
     pub codex_config: PathBuf,
     pub hermes_config: PathBuf,
     pub hermes_soul: PathBuf,
+    /// DeepSeek Harness home patch (applies to every dsh profile) and its
+    /// user-global AGENTS.md.
+    pub dsh_home: PathBuf,
+    pub dsh_patch: PathBuf,
+    pub dsh_instructions: PathBuf,
 }
 
 impl Paths {
@@ -60,6 +65,9 @@ impl Paths {
             codex_config: user.join(".codex").join("config.toml"),
             hermes_config: user.join(".hermes").join("config.yaml"),
             hermes_soul: user.join(".hermes").join("SOUL.md"),
+            dsh_home: dsh_home(&user),
+            dsh_patch: dsh_home(&user).join("cordis.patch.yml"),
+            dsh_instructions: dsh_home(&user).join("AGENTS.md"),
             agent_home: home,
             user_home: user,
         }
@@ -70,6 +78,10 @@ impl Paths {
     pub fn targets_real_user(&self) -> bool {
         canonical(&self.user_home) == canonical(&home_dir())
     }
+}
+
+fn dsh_home(user: &Path) -> PathBuf {
+    env_any(&["DSH_HOME"]).map(|v| expand_user(&v)).unwrap_or_else(|| user.join(".dsh"))
 }
 
 /// First non-empty variable; the AGENT_SWITCH_* names predate the rename.

@@ -37,8 +37,8 @@ struct DashboardView: View {
                 .symbolEffect(.pulse, isActive: state.syncing)
             VStack(alignment: .leading, spacing: 4) {
                 Text(heroTitle).font(.title.weight(.semibold))
-                Text(L10n.t("Secrets, MCP servers and Skills for Claude Code, Codex and Hermes — managed in one place.",
-                            "Claude Code、Codex、Hermes 的密钥、MCP 和 Skill，统一在这里管理。"))
+                Text(L10n.t("Secrets, MCP servers and Skills for Claude Code, Codex, DeepSeek Harness and Hermes — in one place.",
+                            "Claude Code、Codex、DeepSeek Harness、Hermes 的密钥、MCP 和 Skill，统一在这里管理。"))
                     .foregroundStyle(.secondary)
             }
             Spacer()

@@ -364,8 +364,8 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 0.4.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.jnhflow.AgentSwitch;
-				PRODUCT_NAME = "Agent Switch";
+				PRODUCT_BUNDLE_IDENTIFIER = com.risingjerry.fusebox;
+				PRODUCT_NAME = Fusebox;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 			};
@@ -389,8 +389,8 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 0.4.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.jnhflow.AgentSwitch;
-				PRODUCT_NAME = "Agent Switch";
+				PRODUCT_BUNDLE_IDENTIFIER = com.risingjerry.fusebox;
+				PRODUCT_NAME = Fusebox;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 			};

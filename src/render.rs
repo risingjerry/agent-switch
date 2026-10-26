@@ -174,6 +174,67 @@ pub fn codex_config(current: &str, desired: &Desired, instruction_file: Option<&
     Ok(format!("{}\n", joined.trim_end()))
 }
 
+// ---- DeepSeek Harness (cordis patch list, line-preserving) ----
+
+const DSH_START: &str = "# BEGIN FUSEBOX MANAGED MCP — edits inside this block are overwritten";
+const DSH_END: &str = "# END FUSEBOX MANAGED MCP";
+
+/// `~/.dsh/cordis.patch.yml` is a top-level YAML list applied to every dsh
+/// profile. Fusebox owns one marked block of `insert` rows mounting
+/// `dsh-mcp-client`; everything outside the block is kept verbatim.
+pub fn dsh_patch(current: &str, desired: &Desired) -> Result<String> {
+    let mut kept: Vec<&str> = Vec::new();
+    let mut inside = false;
+    for line in splitlines(current) {
+        if line.starts_with("# BEGIN FUSEBOX MANAGED MCP") {
+            inside = true;
+            continue;
+        }
+        if inside {
+            inside = line != DSH_END;
+            continue;
+        }
+        kept.push(line);
+    }
+    let content: Vec<&str> = kept.iter().map(|l| l.trim()).filter(|l| !l.is_empty() && !l.starts_with('#')).collect();
+    let empty_flow = content == ["[]"];
+    if !empty_flow && content.first().is_some_and(|l| l.starts_with('[') || l.starts_with('{')) {
+        return Err("dsh patch uses YAML flow style; convert it to a block list (`- id: ...`) first".into());
+    }
+    if empty_flow {
+        kept.retain(|l| l.trim() != "[]");
+    }
+    let base = kept.join("\n");
+    let base = base.trim_end();
+    let mut out = String::from(base);
+    if desired.is_empty() {
+        if content.is_empty() || empty_flow {
+            if !out.is_empty() {
+                out.push('\n');
+            }
+            out.push_str("[]");
+        }
+        out.push('\n');
+        return Ok(out);
+    }
+    if !out.is_empty() {
+        out.push_str("\n\n");
+    }
+    out.push_str(DSH_START);
+    out.push_str("\n- insert:\n");
+    for (id, spec) in desired {
+        let args: Vec<String> = spec.args.iter().map(|a| json_str_ascii(a)).collect();
+        out.push_str(&format!(
+            "    - id: {id}\n      name: '@deepseek-ai/dsh-mcp-client'\n      config:\n        serverName: {id}\n        transport: stdio\n        command: {}\n        args: [{}]\n",
+            json_str_ascii(&spec.command),
+            args.join(", ")
+        ));
+    }
+    out.push_str(DSH_END);
+    out.push('\n');
+    Ok(out)
+}
+
 // ---- Hermes (YAML subset, line-preserving) ----
 
 fn is_top_level_key(line: &str) -> bool {
@@ -314,6 +375,23 @@ mod tests {
         let expected = "model = \"x\"\n\nmodel_instructions_file = \"/i/AGENTS.md\"\n[mcp_servers.keep]\ncommand = \"k\"\n\n[mcp_servers.agent-a]\nargs = [\"x\", \"\\u00e9\"]\ncommand = \"/bin/mcp-a\"\n\n[mcp_servers.agent-b]\nargs = []\ncommand = \"/bin/mcp-b\"\n";
         assert_eq!(out, expected);
         assert!(codex_config("not = = toml", &desired(), None).is_err());
+    }
+
+    #[test]
+    fn dsh_patch_owns_one_block() {
+        let current = "# header\n- id: session-log-deepseek\n  config:\n    enabled: false\n";
+        let out = dsh_patch(current, &desired()).unwrap();
+        assert!(out.starts_with(current.trim_end()));
+        assert!(out.contains("- insert:\n    - id: agent-a\n      name: '@deepseek-ai/dsh-mcp-client'"));
+        assert!(out.contains("        args: [\"x\", \"\\u00e9\"]\n"));
+        // Re-rendering is stable and removing everything restores the original.
+        assert_eq!(dsh_patch(&out, &desired()).unwrap(), out);
+        assert_eq!(dsh_patch(&out, &Desired::new()).unwrap(), current);
+        // An empty flow list becomes a block list, and back.
+        let from_empty = dsh_patch("# c\n[]\n", &desired()).unwrap();
+        assert!(!from_empty.contains("[]\n# BEGIN"));
+        assert_eq!(dsh_patch(&from_empty, &Desired::new()).unwrap(), "# c\n[]\n");
+        assert!(dsh_patch("[{id: x}]", &desired()).is_err());
     }
 
     #[test]

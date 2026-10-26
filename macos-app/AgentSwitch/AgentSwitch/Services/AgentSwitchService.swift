@@ -14,11 +14,12 @@ actor AgentSwitchService {
         let custom = UserDefaults.standard.string(forKey: Self.cliPathKey).flatMap { $0.isEmpty ? nil : $0 }
         let candidates = [
             custom,
-            ProcessInfo.processInfo.environment["AGENT_SWITCH_CLI"],
+            ProcessInfo.processInfo.environment["FUSEBOX_CLI"],
+            home + "/.local/bin/fusebox",
+            "/opt/homebrew/bin/fusebox",
+            "/usr/local/bin/fusebox",
+            home + "/.cargo/bin/fusebox",
             home + "/.local/bin/agent-switch",
-            "/opt/homebrew/bin/agent-switch",
-            "/usr/local/bin/agent-switch",
-            home + "/.cargo/bin/agent-switch",
         ].compactMap { $0 }
         guard let path = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else {
             throw ServiceError.binaryNotFound
@@ -49,7 +50,9 @@ actor AgentSwitchService {
 
     /// Non-secret env values are only in config.json, not in `mcp list`.
     func envValues(id: String) -> [String: String] {
-        let path = NSHomeDirectory() + "/.config/agent-switch/config.json"
+        let path = ["/.config/fusebox/config.json", "/.config/agent-switch/config.json"]
+            .map { NSHomeDirectory() + $0 }
+            .first { FileManager.default.fileExists(atPath: $0) } ?? ""
         guard let data = FileManager.default.contents(atPath: path),
               let config = try? JSONDecoder().decode(ConfigFile.self, from: data)
         else { return [:] }
@@ -104,7 +107,7 @@ actor AgentSwitchService {
     /// value never passes through stdout, a regular file or arguments.
     func revealSecret(name: String) async throws -> String {
         let executable = try binary()
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("agent-switch-\(UUID().uuidString)")
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("fusebox-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: false,
                                                 attributes: [.posixPermissions: 0o700])
         defer { try? FileManager.default.removeItem(at: dir) }
@@ -229,9 +232,9 @@ enum ServiceError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .binaryNotFound:
-            return L10n.t("agent-switch was not found. Install it or set its path in Settings.",
-                          "找不到 agent-switch 程序，请先安装，或在设置里填写它的位置。")
-        case .cli(let detail): return detail.replacingOccurrences(of: "agent-switch: ", with: "")
+            return L10n.t("fusebox was not found. Install it or set its path in Settings.",
+                          "找不到 fusebox 程序，请先安装，或在设置里填写它的位置。")
+        case .cli(let detail): return detail.replacingOccurrences(of: "fusebox: ", with: "")
         case .badOutput(let command): return L10n.t("Unexpected output from `\(command)`", "`\(command)` 的输出无法识别")
         case .invalidSecretResponse: return L10n.t("Could not read the secret", "读取密钥失败")
         }

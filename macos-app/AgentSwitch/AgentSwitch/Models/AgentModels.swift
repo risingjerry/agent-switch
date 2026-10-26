@@ -73,11 +73,31 @@ struct AppFlags: Codable, Equatable {
     var claude_desktop: Bool
     var codex: Bool
     var hermes: Bool
+    /// DeepSeek Harness; absent in configs written before it was supported.
+    var deepseek: Bool
 
-    static let all = AppFlags(claude: true, claude_desktop: true, codex: true, hermes: true)
+    static let all = AppFlags(claude: true, claude_desktop: true, codex: true, hermes: true, deepseek: true)
+
+    init(claude: Bool, claude_desktop: Bool, codex: Bool, hermes: Bool, deepseek: Bool) {
+        self.claude = claude
+        self.claude_desktop = claude_desktop
+        self.codex = codex
+        self.hermes = hermes
+        self.deepseek = deepseek
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        claude = try c.decode(Bool.self, forKey: .claude)
+        claude_desktop = try c.decode(Bool.self, forKey: .claude_desktop)
+        codex = try c.decode(Bool.self, forKey: .codex)
+        hermes = try c.decode(Bool.self, forKey: .hermes)
+        deepseek = try c.decodeIfPresent(Bool.self, forKey: .deepseek) ?? false
+    }
 
     var names: [String] {
-        [("claude", claude), ("claude_desktop", claude_desktop), ("codex", codex), ("hermes", hermes)]
+        [("claude", claude), ("claude_desktop", claude_desktop), ("codex", codex), ("hermes", hermes),
+         ("deepseek", deepseek)]
             .filter(\.1).map(\.0)
     }
 }
