@@ -1,0 +1,352 @@
+//! `skills usage` / `skills prune`: which skills each agent actually used,
+//! counted from local session transcripts, with an incremental cache.
+//!
+//! Claude Code: `~/.claude/projects/**/*.jsonl` — `Skill` tool calls and
+//! `Read` calls on a `<name>/SKILL.md`. Codex: `~/.codex/sessions/**/*.jsonl` —
+//! `function_call` / `custom_tool_call` arguments that reference a
+//! `<name>/SKILL.md` (the injected skill list is not a tool call, so it is
+//! ignored).
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
+use std::os::unix::fs::MetadataExt;
+use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
+use std::time::{Duration, SystemTime};
+
+use regex_lite::Regex;
+use serde_json::{Map, Value, json};
+
+use crate::paths::Paths;
+use crate::util::{Result, write_if_changed};
+
+const CACHE_VERSION: u64 = 1;
+
+static SKILL_MD_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"([A-Za-z0-9_.:-]+)/SKILL\.md").unwrap());
+static CLAUDE_SKILL_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#""name":"Skill","input":\{"skill":"([^"]+)""#).unwrap());
+static CLAUDE_READ_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#""name":"Read","input":\{"file_path":"[^"]*?([A-Za-z0-9_.:-]+)/SKILL\.md""#).unwrap()
+});
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub enum Agent {
+    Claude,
+    Codex,
+}
+
+impl Agent {
+    fn key(self) -> &'static str {
+        match self {
+            Agent::Claude => "claude",
+            Agent::Codex => "codex",
+        }
+    }
+}
+
+/// Byte substring search; the needle is short, the haystack is a whole file.
+fn find_all<'a>(hay: &'a [u8], needle: &'a [u8]) -> impl Iterator<Item = usize> + 'a {
+    let first = needle[0];
+    let mut pos = 0;
+    std::iter::from_fn(move || {
+        while pos + needle.len() <= hay.len() {
+            let offset = hay[pos..hay.len() - needle.len() + 1].iter().position(|&b| b == first)?;
+            let at = pos + offset;
+            pos = at + 1;
+            if &hay[at..at + needle.len()] == needle {
+                return Some(at);
+            }
+        }
+        None
+    })
+}
+
+/// Each distinct line that contains `needle`.
+fn lines_with<'a>(hay: &'a [u8], needle: &'a [u8]) -> Vec<&'a [u8]> {
+    let mut out = Vec::new();
+    let mut last_end = 0;
+    for at in find_all(hay, needle) {
+        if at < last_end {
+            continue;
+        }
+        let start = hay[..at].iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1);
+        let end = hay[at..].iter().position(|&b| b == b'\n').map_or(hay.len(), |i| at + i);
+        out.push(&hay[start..end]);
+        last_end = end;
+    }
+    out
+}
+
+pub fn scan_file(agent: Agent, bytes: &[u8]) -> BTreeSet<String> {
+    let mut found = BTreeSet::new();
+    match agent {
+        Agent::Claude => {
+            for line in lines_with(bytes, b"\"name\":\"Skill\"") {
+                let line = String::from_utf8_lossy(line);
+                found.extend(CLAUDE_SKILL_RE.captures_iter(&line).map(|c| c[1].to_string()));
+            }
+            for line in lines_with(bytes, b"/SKILL.md") {
+                let line = String::from_utf8_lossy(line);
+                if line.contains("\"type\":\"tool_use\"") {
+                    found.extend(CLAUDE_READ_RE.captures_iter(&line).map(|c| c[1].to_string()));
+                }
+            }
+        }
+        Agent::Codex => {
+            for line in lines_with(bytes, b"/SKILL.md") {
+                if find_all(line, b"_call\"").next().is_none() {
+                    continue;
+                }
+                let Ok(value) = serde_json::from_slice::<Value>(line) else { continue };
+                let payload = &value["payload"];
+                if !matches!(payload["type"].as_str(), Some("function_call" | "custom_tool_call")) {
+                    continue;
+                }
+                for field in ["arguments", "input"] {
+                    if let Some(text) = payload[field].as_str() {
+                        found.extend(SKILL_MD_RE.captures_iter(text).map(|c| c[1].to_string()));
+                    }
+                }
+            }
+        }
+    }
+    found.retain(|n| !n.is_empty() && n != "." && n != "..");
+    found
+}
+
+fn collect_jsonl(dir: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(rd) = fs::read_dir(dir) else { return };
+    for e in rd.filter_map(|e| e.ok()) {
+        let p = e.path();
+        match e.file_type() {
+            Ok(ft) if ft.is_dir() => collect_jsonl(&p, out),
+            Ok(ft) if ft.is_file() && p.extension().is_some_and(|x| x == "jsonl") => out.push(p),
+            _ => {}
+        }
+    }
+}
+
+struct FileEntry {
+    agent: Agent,
+    size: u64,
+    mtime: i64,
+    skills: Vec<String>,
+}
+
+fn load_cache(path: &Path) -> BTreeMap<String, FileEntry> {
+    let Ok(text) = fs::read_to_string(path) else { return BTreeMap::new() };
+    let Ok(value) = serde_json::from_str::<Value>(&text) else { return BTreeMap::new() };
+    if value["version"].as_u64() != Some(CACHE_VERSION) {
+        return BTreeMap::new();
+    }
+    let Some(files) = value["files"].as_object() else { return BTreeMap::new() };
+    files
+        .iter()
+        .filter_map(|(k, v)| {
+            Some((
+                k.clone(),
+                FileEntry {
+                    agent: if v["agent"] == "codex" { Agent::Codex } else { Agent::Claude },
+                    size: v["size"].as_u64()?,
+                    mtime: v["mtime"].as_i64()?,
+                    skills: v["skills"].as_array()?.iter().filter_map(|s| s.as_str().map(String::from)).collect(),
+                },
+            ))
+        })
+        .collect()
+}
+
+fn save_cache(path: &Path, files: &BTreeMap<String, FileEntry>) -> Result<()> {
+    let mut map = Map::new();
+    for (k, e) in files {
+        map.insert(k.clone(), json!({"agent": e.agent.key(), "size": e.size, "mtime": e.mtime, "skills": e.skills}));
+    }
+    if let Some(parent) = path.parent() {
+        crate::util::ensure_private_dir(parent);
+    }
+    write_if_changed(path, &json!({"version": CACHE_VERSION, "files": map}).to_string(), Some(0o600), None).map(|_| ())
+}
+
+#[derive(Default, Clone)]
+pub struct SkillUse {
+    pub claude: usize,
+    pub codex: usize,
+    pub last_used: i64,
+}
+
+impl SkillUse {
+    pub fn total(&self) -> usize {
+        self.claude + self.codex
+    }
+}
+
+pub struct UsageStats {
+    pub days: u64,
+    pub sessions: BTreeMap<&'static str, usize>,
+    pub skills: BTreeMap<String, SkillUse>,
+    pub scanned: usize,
+    pub cached: usize,
+}
+
+impl UsageStats {
+    /// Usage for a skill, matching its name or the last path component
+    /// (plugin skills are logged as `plugin:name`, files as `<dir>/SKILL.md`).
+    pub fn lookup(&self, name: &str, dir: Option<&str>) -> SkillUse {
+        let mut total = SkillUse::default();
+        for (key, u) in &self.skills {
+            let short = key.rsplit(':').next().unwrap_or(key);
+            if key == name || dir.is_some_and(|d| key == d || short == d) {
+                total.claude += u.claude;
+                total.codex += u.codex;
+                total.last_used = total.last_used.max(u.last_used);
+            }
+        }
+        total
+    }
+}
+
+pub fn collect(paths: &Paths, days: u64) -> Result<UsageStats> {
+    let cutoff = SystemTime::now()
+        .checked_sub(Duration::from_secs(days * 86_400))
+        .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
+        .map_or(0, |d| d.as_secs() as i64);
+    let roots = [
+        (Agent::Claude, paths.user_home.join(".claude").join("projects")),
+        (Agent::Codex, paths.user_home.join(".codex").join("sessions")),
+    ];
+    let mut files: Vec<(Agent, PathBuf, u64, i64)> = Vec::new();
+    for (agent, root) in &roots {
+        let mut found = Vec::new();
+        collect_jsonl(root, &mut found);
+        for p in found {
+            let Ok(meta) = fs::metadata(&p) else { continue };
+            if meta.mtime() >= cutoff {
+                files.push((*agent, p, meta.len(), meta.mtime()));
+            }
+        }
+    }
+    let cache_path = paths.cache_dir.join("skill-usage.json");
+    let cache = load_cache(&cache_path);
+    let mut fresh: BTreeMap<String, FileEntry> = BTreeMap::new();
+    let mut todo = Vec::new();
+    for (agent, path, size, mtime) in files {
+        let key = path.to_string_lossy().into_owned();
+        match cache.get(&key) {
+            Some(e) if e.size == size && e.mtime == mtime && e.agent == agent => {
+                fresh.insert(key, FileEntry { agent, size, mtime, skills: e.skills.clone() });
+            }
+            _ => todo.push((agent, path, size, mtime, key)),
+        }
+    }
+    let cached = fresh.len();
+    let scanned = todo.len();
+    // Bounded parallelism: this machine also runs agents and builds.
+    let workers = std::thread::available_parallelism().map_or(2, |n| n.get().min(4));
+    let chunk = todo.len().div_ceil(workers).max(1);
+    let results: Vec<(String, FileEntry)> = std::thread::scope(|scope| {
+        let handles: Vec<_> = todo
+            .chunks(chunk)
+            .map(|part| {
+                scope.spawn(move || {
+                    part.iter()
+                        .map(|(agent, path, size, mtime, key)| {
+                            let skills =
+                                fs::read(path).map(|b| scan_file(*agent, &b).into_iter().collect()).unwrap_or_default();
+                            (key.clone(), FileEntry { agent: *agent, size: *size, mtime: *mtime, skills })
+                        })
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        handles.into_iter().flat_map(|h| h.join().unwrap_or_default()).collect()
+    });
+    fresh.extend(results);
+    if scanned > 0 || cached != cache.len() {
+        save_cache(&cache_path, &fresh)?;
+    }
+    let mut stats = UsageStats { days, sessions: BTreeMap::new(), skills: BTreeMap::new(), scanned, cached };
+    for e in fresh.values() {
+        *stats.sessions.entry(e.agent.key()).or_default() += 1;
+        for name in &e.skills {
+            let u = stats.skills.entry(name.clone()).or_default();
+            match e.agent {
+                Agent::Claude => u.claude += 1,
+                Agent::Codex => u.codex += 1,
+            }
+            u.last_used = u.last_used.max(e.mtime);
+        }
+    }
+    Ok(stats)
+}
+
+/// Characters of `name` + `description` from a SKILL.md frontmatter: what
+/// every session pays for having the skill listed.
+pub fn listing_chars(skill_md: &Path) -> usize {
+    let Ok(text) = fs::read_to_string(skill_md) else { return 0 };
+    let Some(body) = text.strip_prefix("---") else { return 0 };
+    let front = body.split("\n---").next().unwrap_or("");
+    let mut total = 0;
+    let mut in_desc = false;
+    for line in front.lines() {
+        let is_key = line.chars().next().is_some_and(|c| c.is_ascii_alphabetic()) && line.contains(':');
+        if is_key {
+            in_desc = false;
+            let (key, value) = line.split_once(':').unwrap();
+            if matches!(key.trim(), "name" | "description" | "when_to_use") {
+                total += value.trim().chars().count();
+                in_desc = key.trim() != "name";
+            }
+        } else if in_desc {
+            total += line.trim().chars().count();
+        }
+    }
+    total
+}
+
+pub fn date_of(ts: i64) -> String {
+    if ts <= 0 {
+        return "-".into();
+    }
+    crate::skills::now_iso_at(ts as u64)[..10].to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scans_claude_skill_and_read_calls() {
+        let log = concat!(
+            r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"explore-map","args":"x"}}]}}"#,
+            "\n",
+            r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"/a/skills/unified-search/SKILL.md"}}]}}"#,
+            "\n",
+            r#"{"type":"user","message":{"content":"see /x/other/SKILL.md"}}"#,
+            "\n"
+        );
+        let found = scan_file(Agent::Claude, log.as_bytes());
+        assert_eq!(found.into_iter().collect::<Vec<_>>(), vec!["explore-map", "unified-search"]);
+    }
+
+    #[test]
+    fn scans_codex_tool_calls_only() {
+        let log = concat!(
+            r#"{"type":"session_meta","payload":{"instructions":"- a: x (file: r0/listed/SKILL.md)"}}"#,
+            "\n",
+            r#"{"type":"response_item","payload":{"type":"function_call","name":"exec","arguments":"{\"cmd\":\"sed -n 1,80p /s/skills/wechat-native/SKILL.md\"}"}}"#,
+            "\n"
+        );
+        let found = scan_file(Agent::Codex, log.as_bytes());
+        assert_eq!(found.into_iter().collect::<Vec<_>>(), vec!["wechat-native"]);
+    }
+
+    #[test]
+    fn listing_cost_counts_frontmatter() {
+        let dir = std::env::temp_dir().join(format!("as-usage-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("SKILL.md");
+        fs::write(&f, "---\nname: abc\ndescription: >\n  hello\n  world\nlicense: MIT\n---\nbody").unwrap();
+        assert_eq!(listing_chars(&f), 3 + 1 + 5 + 5);
+        let _ = fs::remove_dir_all(&dir);
+    }
+}
