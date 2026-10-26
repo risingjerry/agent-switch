@@ -9,6 +9,16 @@ permissions:
   contents: read
 
 jobs:
+  rust:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup component add clippy rustfmt
+      - run: cargo fmt --check
+      - run: cargo clippy --release --all-targets -- -D warnings
+      - run: cargo test --release
+      - run: ./target/release/agent-switch --version
+
   python:
     runs-on: macos-14
     strategy:
