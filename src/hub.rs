@@ -25,6 +25,12 @@ use crate::run;
 const DEFAULT_PROTOCOL: &str = "2025-06-18";
 const DEFAULT_IDLE: u64 = 300;
 const SEP: &str = "__";
+/// Servers with more tools than this are reached through fusebox_servers /
+/// fusebox_call only: listing hundreds of definitions costs every session.
+const MAX_LISTED_TOOLS: usize = 30;
+/// Hosts reject tool names longer than 64 characters; Claude Code prefixes
+/// ours with `mcp__agent-hub__`.
+const MAX_NAME: usize = 64 - "mcp__agent-hub__".len();
 
 type Out = Arc<Mutex<std::io::Stdout>>;
 /// "Start in progress" flag plus its wake-up signal.
@@ -74,6 +80,8 @@ struct Backend {
     alive: AtomicBool,
     last_used: Mutex<Instant>,
     in_flight: AtomicU64,
+    /// One tools/call at a time: many stdio servers stall on concurrent calls.
+    calls: Mutex<()>,
     idle: Duration,
 }
 
@@ -99,6 +107,7 @@ impl Backend {
             alive: AtomicBool::new(true),
             last_used: Mutex::new(Instant::now()),
             in_flight: AtomicU64::new(0),
+            calls: Mutex::new(()),
             idle: Duration::from_secs(tool.idle_seconds.unwrap_or(DEFAULT_IDLE)),
         });
         let reader = Arc::clone(&backend);
@@ -229,11 +238,17 @@ impl State {
         }
         for tool in self.hub_tools() {
             let Some(manifest) = load_manifest(&self.paths, &tool.id) else { continue };
+            let tools = manifest["tools"].as_array().cloned().unwrap_or_default();
+            if tools.len() > MAX_LISTED_TOOLS {
+                continue;
+            }
             let prefix = short_id(&tool);
-            for t in manifest["tools"].as_array().into_iter().flatten() {
-                let mut t = t.clone();
-                let name = t["name"].as_str().unwrap_or("").to_string();
-                t["name"] = json!(format!("{prefix}{SEP}{name}"));
+            for mut t in tools {
+                let name = format!("{prefix}{SEP}{}", t["name"].as_str().unwrap_or(""));
+                if name.len() > MAX_NAME {
+                    continue; // still reachable through fusebox_call
+                }
+                t["name"] = json!(name);
                 if let Some(desc) = t.get("description").and_then(Value::as_str) {
                     t["description"] = json!(format!("[{}] {desc}", tool.name));
                 }
@@ -246,7 +261,7 @@ impl State {
     fn instructions(&self) -> String {
         let mut parts = vec![
             "On-demand MCP servers managed by Fusebox. Tools named <server>__<tool> start their server on first use. \
-             Servers that never ran have no listed tools yet: call fusebox_servers to see every server (pass `server` \
+             Servers that never ran, or have many tools, are not listed tool by tool: call fusebox_servers to see every server (pass `server` \
              to start one and get its tools), then fusebox_call to use a tool."
                 .to_string(),
         ];
@@ -321,9 +336,29 @@ impl State {
             let tool = self.find_server(key)?;
             self.backend(&tool)?.touch();
             let manifest = load_manifest(&self.paths, &tool.id).unwrap_or(Value::Null);
-            let tools = manifest["tools"].clone();
+            let all = manifest["tools"].as_array().cloned().unwrap_or_default();
+            if let Some(name) = args["tool"].as_str().filter(|s| !s.is_empty()) {
+                let def = all.iter().find(|t| t["name"] == name).ok_or_else(|| format!("{key} has no tool {name}"))?;
+                return Ok(json!({"content": [{"type": "text", "text": def.to_string()}]}));
+            }
+            // Large servers: names and one-line summaries; schemas on request.
+            let tools: Vec<Value> = if all.len() > MAX_LISTED_TOOLS {
+                all.iter()
+                    .map(|t| {
+                        let desc = t["description"].as_str().unwrap_or("").lines().next().unwrap_or("");
+                        json!({"name": t["name"], "description": desc.chars().take(120).collect::<String>()})
+                    })
+                    .collect()
+            } else {
+                all
+            };
+            let usage = if tools.len() > MAX_LISTED_TOOLS {
+                "pass `tool` to fusebox_servers for a tool's input schema; call tools with fusebox_call {server, tool, arguments}"
+            } else {
+                "call tools with fusebox_call {server, tool, arguments}"
+            };
             let text = json!({"server": short_id(&tool), "name": tool.name, "instructions": manifest["instructions"],
-                "tools": tools, "usage": "call tools with fusebox_call {server, tool, arguments}"});
+                "tools": tools, "usage": usage});
             return Ok(json!({"content": [{"type": "text", "text": text.to_string()}]}));
         }
         let list: Vec<Value> = self
@@ -360,7 +395,10 @@ impl State {
         backend.in_flight.fetch_add(1, Ordering::SeqCst);
         backend.touch();
         let forwarded = json!({"name": name, "arguments": if arguments.is_null() { json!({}) } else { arguments }});
-        let result = backend.request("tools/call", forwarded, None);
+        let result = {
+            let _turn = backend.calls.lock().unwrap();
+            backend.request("tools/call", forwarded, None)
+        };
         backend.touch();
         backend.in_flight.fetch_sub(1, Ordering::SeqCst);
         result
@@ -449,8 +487,10 @@ fn meta_tools() -> Vec<Value> {
     vec![
         json!({
             "name": "fusebox_servers",
-            "description": "List the on-demand MCP servers Fusebox can start for you, with their tools. Pass `server` to start one and get its full tool list (names, descriptions, input schemas).",
-            "inputSchema": {"type": "object", "properties": {"server": {"type": "string", "description": "server to start, e.g. rea"}}},
+            "description": "List the on-demand MCP servers Fusebox can start for you, with their tools. Pass `server` to start one and get its tool list (names, descriptions, input schemas; large servers list names only — add `tool` for one schema).",
+            "inputSchema": {"type": "object", "properties": {
+                "server": {"type": "string", "description": "server to start, e.g. rea"},
+                "tool": {"type": "string", "description": "with server: return this tool's full definition"}}},
         }),
         json!({
             "name": "fusebox_call",

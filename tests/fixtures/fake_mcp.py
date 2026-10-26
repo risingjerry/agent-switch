@@ -15,7 +15,9 @@ for line in sys.stdin:
         reply(msg_id, {"protocolVersion": msg["params"]["protocolVersion"], "capabilities": {"tools": {}},
                        "serverInfo": {"name": "fake", "version": "1"}, "instructions": "fake instructions"})
     elif method == "tools/list":
-        reply(msg_id, {"tools": [{"name": "echo", "description": "Echo back", "inputSchema": {"type": "object"}}]})
+        extra = [{"name": f"tool_{i}", "description": f"Extra {i}\nmore", "inputSchema": {"type": "object"}}
+                 for i in range(int(os.environ.get("FAKE_EXTRA", "0")))]
+        reply(msg_id, {"tools": [{"name": "echo", "description": "Echo back", "inputSchema": {"type": "object"}}] + extra})
     elif method == "tools/call":
         leaked = sorted(k for k in os.environ if k.startswith("OTHER_"))
         text = f"echo:{msg['params']['arguments'].get('text')} token={os.environ.get('FAKE_TOKEN')} leaked={leaked}"

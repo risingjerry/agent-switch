@@ -45,6 +45,10 @@ impl Drop for Hub {
 }
 
 fn write_config(home: &Path, fixture: &Path, enabled: bool) {
+    write_config_with(home, fixture, enabled, 0);
+}
+
+fn write_config_with(home: &Path, fixture: &Path, enabled: bool, extra: usize) {
     let config = json!({
         "secretFile": home.join("secrets.env").to_string_lossy(),
         "routes": {},
@@ -52,7 +56,7 @@ fn write_config(home: &Path, fixture: &Path, enabled: bool) {
             "id": "agent-fake", "name": "fake", "command": "python3",
             "args": [fixture.to_string_lossy()], "requiredSecrets": ["FAKE_TOKEN"],
             "apps": {"claude": true, "claude_desktop": false, "codex": false, "hermes": false},
-            "env": {"FAKE_LOG": home.join("fake.log").to_string_lossy()},
+            "env": {"FAKE_LOG": home.join("fake.log").to_string_lossy(), "FAKE_EXTRA": extra.to_string()},
             "enabled": enabled, "mode": "hub", "idleSeconds": 1, "description": null,
         }],
     });
@@ -71,16 +75,7 @@ fn alive(pid: u32) -> bool {
     Command::new("kill").args(["-0", &pid.to_string()]).stderr(Stdio::null()).status().is_ok_and(|s| s.success())
 }
 
-#[test]
-fn hub_is_lazy_scoped_reaps_and_reloads() {
-    let root: PathBuf = std::env::temp_dir().join(format!("as-hub-test-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&root);
-    let home = root.join("agent");
-    fs::create_dir_all(&home).unwrap();
-    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_mcp.py");
-    fs::write(home.join("secrets.env"), "FAKE_TOKEN=tok-1\nOTHER_SECRET=nope\n").unwrap();
-    write_config(&home, &fixture, true);
-
+fn spawn_hub(root: &Path, home: &Path) -> Hub {
     let mut child = Command::new(env!("CARGO_BIN_EXE_fusebox"))
         .args(["--home", &home.to_string_lossy(), "--user-home", &root.to_string_lossy(), "hub", "claude"])
         .env("FUSEBOX_CACHE", root.join("cache"))
@@ -100,9 +95,56 @@ fn hub_is_lazy_scoped_reaps_and_reloads() {
         }
     });
     let mut hub = Hub { child, stdin, rx };
-
     hub.send(json!({"jsonrpc": "2.0", "id": 1, "method": "initialize",
         "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}}}));
+    hub
+}
+
+#[test]
+fn large_servers_are_not_listed_tool_by_tool() {
+    let root: PathBuf = std::env::temp_dir().join(format!("as-hub-big-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    let home = root.join("agent");
+    fs::create_dir_all(&home).unwrap();
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_mcp.py");
+    fs::write(home.join("secrets.env"), "FAKE_TOKEN=tok-1\n").unwrap();
+    write_config_with(&home, &fixture, true, 40);
+    let mut hub = spawn_hub(&root, &home);
+    hub.response(1);
+    hub.send(json!({"jsonrpc": "2.0", "method": "notifications/initialized"}));
+
+    // Starting it returns names and one-line summaries, not 41 schemas.
+    hub.send(json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+        "params": {"name": "fusebox_servers", "arguments": {"server": "fake"}}}));
+    let text: Value =
+        serde_json::from_str(hub.response(2)["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    let tools = text["tools"].as_array().unwrap();
+    assert_eq!(tools.len(), 41);
+    assert_eq!(tools[1], json!({"name": "tool_0", "description": "Extra 0"}));
+    // One schema on request.
+    hub.send(json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+        "params": {"name": "fusebox_servers", "arguments": {"server": "fake", "tool": "tool_3"}}}));
+    let def: Value = serde_json::from_str(hub.response(3)["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(def["inputSchema"], json!({"type": "object"}));
+    // tools/list keeps only the two Fusebox tools even after the start.
+    hub.send(json!({"jsonrpc": "2.0", "id": 4, "method": "tools/list"}));
+    assert_eq!(hub.response(4)["result"]["tools"].as_array().unwrap().len(), 2);
+
+    drop(hub);
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn hub_is_lazy_scoped_reaps_and_reloads() {
+    let root: PathBuf = std::env::temp_dir().join(format!("as-hub-test-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    let home = root.join("agent");
+    fs::create_dir_all(&home).unwrap();
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_mcp.py");
+    fs::write(home.join("secrets.env"), "FAKE_TOKEN=tok-1\nOTHER_SECRET=nope\n").unwrap();
+    write_config(&home, &fixture, true);
+
+    let mut hub = spawn_hub(&root, &home);
     let init = hub.response(1);
     assert_eq!(init["result"]["capabilities"]["tools"]["listChanged"], json!(true));
     assert!(starts(&home).is_empty(), "initialize must not start backends");
