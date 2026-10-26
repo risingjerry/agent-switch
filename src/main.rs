@@ -392,7 +392,16 @@ fn cmd_mcp(ctx: &Ctx, a: &Args) -> Result<i32> {
                 "hub" => "hub-served",
                 _ => "direct",
             };
-            json_or_line(json, json!({"changed": r.changed, "mcp": tool.to_public()}), &format!("{verb} {id}"));
+            let mut line = format!("{verb} {id}");
+            if sub == "hub" && tool.enabled {
+                match hub::warm(&ctx.paths, &updated, tool) {
+                    Ok(n) => line.push_str(&format!("; cached {n} tool(s); run `agent-switch reconcile`")),
+                    Err(e) => {
+                        line.push_str(&format!("; tool list not cached yet ({e}); the hub retries on first start"))
+                    }
+                }
+            }
+            json_or_line(json, json!({"changed": r.changed, "mcp": tool.to_public()}), &line);
             Ok(0)
         }
         "import" => cmd_mcp_import(ctx, a),

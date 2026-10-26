@@ -384,6 +384,20 @@ impl State {
     }
 }
 
+/// Start `tool` once, record its tool manifest and stop it. Returns the
+/// number of tools. Used when a tool is switched to hub mode so the very
+/// next session already lists its tools.
+pub fn warm(paths: &Paths, config: &Config, tool: &Tool) -> crate::util::Result<usize> {
+    let backend = Backend::spawn(config, tool, paths)?;
+    let result = backend.handshake(DEFAULT_PROTOCOL).and_then(|init| Ok((init, backend.list_tools()?)));
+    backend.stop();
+    let (init, tools) = result?;
+    let count = tools.len();
+    let manifest = json!({"tools": tools, "instructions": init["instructions"], "updatedAt": crate::skills::now_iso()});
+    save_manifest(paths, &tool.id, &manifest);
+    Ok(count)
+}
+
 pub fn serve(paths: Paths, config_path: PathBuf, app: String) -> crate::util::Result<()> {
     let config = config::load(&config_path, &paths.secrets_file)?;
     let state = Arc::new(State {
