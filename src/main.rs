@@ -158,6 +158,7 @@ Usage: fusebox [--home DIR] [--user-home DIR] [--config FILE] <command>
   skills status|fetch|promote|enable|disable|sync|sync-global|update
   skills usage [--days 60] [--json]     what each agent actually used
   skills prune [--days 60] [--profile global] [--apply]
+  advise [--days 60] [--json]          suggestions (with commands) for an agent to apply
   run ID [ARGS...]                      start an MCP with only its secrets (used by wrappers)
   hub APP                               lazy MCP proxy (used by the agent-hub entry)
   write-default-config
@@ -231,6 +232,7 @@ fn dispatch(argv: &[String]) -> Result<i32> {
             Ok(0)
         }
         "mcp" => cmd_mcp(&ctx, &rest),
+        "advise" => cmd_advise(&ctx, &rest),
         "secret" => cmd_secret(&ctx, &rest),
         "skills" => cmd_skills(&ctx, &rest),
         "hub" => {
@@ -695,47 +697,45 @@ fn cmd_skills_usage(ctx: &Ctx, a: &Args) -> Result<i32> {
     for e in enabled_everywhere(&hub) {
         let u = stats.lookup(&e.name, dir_name(&e.skill_md).as_deref());
         rows.push(json!({
-            "name": e.name, "profiles": e.profiles, "claude": u.claude, "codex": u.codex,
+            "name": e.name, "profiles": e.profiles, "claude": u.claude, "codex": u.codex, "deepseek": u.deepseek,
             "lastUsed": usage::date_of(u.last_used), "listingChars": usage::listing_chars(&e.skill_md),
         }));
     }
-    rows.sort_by_key(|r| {
-        (
-            std::cmp::Reverse(r["claude"].as_u64().unwrap_or(0) + r["codex"].as_u64().unwrap_or(0)),
-            r["name"].as_str().unwrap_or("").to_string(),
-        )
-    });
+    let total =
+        |r: &Value| -> u64 { ["claude", "codex", "deepseek"].iter().map(|k| r[*k].as_u64().unwrap_or(0)).sum() };
+    rows.sort_by_key(|r| (std::cmp::Reverse(total(r)), r["name"].as_str().unwrap_or("").to_string()));
+    let use_json = |u: &usage::SkillUse| json!({"claude": u.claude, "codex": u.codex, "deepseek": u.deepseek, "lastUsed": usage::date_of(u.last_used)});
     if a.flag("json") {
-        let used: BTreeMap<&String, Value> = stats
-            .skills
-            .iter()
-            .map(|(k, u)| (k, json!({"claude": u.claude, "codex": u.codex, "lastUsed": usage::date_of(u.last_used)})))
-            .collect();
+        let used: BTreeMap<&String, Value> = stats.skills.iter().map(|(k, u)| (k, use_json(u))).collect();
+        let mcps: BTreeMap<&String, Value> = stats.mcps.iter().map(|(k, u)| (k, use_json(u))).collect();
         let payload = json!({
             "days": stats.days, "sessions": stats.sessions, "scannedFiles": stats.scanned, "cachedFiles": stats.cached,
-            "enabled": rows, "allUsed": used,
+            "enabled": rows, "allUsed": used, "mcps": mcps,
         });
         print(&(json_ordered(&payload) + "\n"));
         return Ok(0);
     }
+    let n = |k: &str| stats.sessions.get(k).copied().unwrap_or(0);
     print(&format!(
-        "Last {} days: {} Claude sessions, {} Codex sessions ({} files scanned, {} cached)\n\n",
+        "Last {} days: {} Claude Code, {} Codex, {} DeepSeek Harness sessions ({} files scanned, {} cached)\n\n",
         stats.days,
-        stats.sessions.get("claude").unwrap_or(&0),
-        stats.sessions.get("codex").unwrap_or(&0),
+        n("claude"),
+        n("codex"),
+        n("deepseek"),
         stats.scanned,
         stats.cached
     ));
     print(&format!(
-        "{:<40} {:>6} {:>6}  {:<10} {:>6}  {}\n",
-        "SKILL", "CLAUDE", "CODEX", "LAST USED", "CHARS", "PROFILES"
+        "{:<40} {:>6} {:>6} {:>8}  {:<10} {:>6}  {}\n",
+        "SKILL", "CLAUDE", "CODEX", "DEEPSEEK", "LAST USED", "CHARS", "PROFILES"
     ));
     for r in &rows {
         print(&format!(
-            "{:<40} {:>6} {:>6}  {:<10} {:>6}  {}\n",
+            "{:<40} {:>6} {:>6} {:>8}  {:<10} {:>6}  {}\n",
             r["name"].as_str().unwrap_or(""),
             r["claude"].as_u64().unwrap_or(0),
             r["codex"].as_u64().unwrap_or(0),
+            r["deepseek"].as_u64().unwrap_or(0),
             r["lastUsed"].as_str().unwrap_or(""),
             r["listingChars"].as_u64().unwrap_or(0),
             r["profiles"]
@@ -744,22 +744,20 @@ fn cmd_skills_usage(ctx: &Ctx, a: &Args) -> Result<i32> {
                 .unwrap_or_default()
         ));
     }
-    let unused = rows.iter().filter(|r| r["claude"] == 0 && r["codex"] == 0).count();
-    print(&format!("\n{unused} of {} enabled skills unused in this window; see `fusebox skills prune`.\n", rows.len()));
+    let unused = rows.iter().filter(|r| total(r) == 0).count();
+    print(&format!("\n{unused} of {} enabled skills unused in this window; see `fusebox advise`.\n", rows.len()));
     Ok(0)
 }
 
-fn cmd_skills_prune(ctx: &Ctx, a: &Args) -> Result<i32> {
-    a.check(&["days", "profile", "apply", "json"])?;
-    let profile = a.one("profile").unwrap_or("global");
-    let stats = usage::collect(&ctx.paths, days(a)?)?;
-    let hub = ctx.hub()?;
-    let enabled = skills::enabled_skills(&hub, profile)?;
-    let keep = skills::profile_keep(&hub, profile);
+/// Enabled skills of `profile` with no use in the window, minus the ones a
+/// used skill depends on or the profile pins in `keep`.
+fn prune_plan(hub: &skills::Hub, stats: &usage::UsageStats, profile: &str) -> Result<(Vec<String>, Vec<Value>)> {
+    let enabled = skills::enabled_skills(hub, profile)?;
+    let keep = skills::profile_keep(hub, profile);
     // A skill that another enabled skill names in its SKILL.md is a
     // dependency (e.g. a publisher that calls a design system), even when it
     // is never invoked directly.
-    let all_enabled = enabled_everywhere(&hub);
+    let all_enabled = enabled_everywhere(hub);
     let texts: Vec<(String, String)> = all_enabled
         .iter()
         .map(|e| (e.name.clone(), std::fs::read_to_string(&e.skill_md).unwrap_or_default()))
@@ -790,6 +788,15 @@ fn cmd_skills_prune(ctx: &Ctx, a: &Args) -> Result<i32> {
         }
         candidates.push(name.clone());
     }
+    Ok((candidates, protected))
+}
+
+fn cmd_skills_prune(ctx: &Ctx, a: &Args) -> Result<i32> {
+    a.check(&["days", "profile", "apply", "json"])?;
+    let profile = a.one("profile").unwrap_or("global");
+    let stats = usage::collect(&ctx.paths, days(a)?)?;
+    let hub = ctx.hub()?;
+    let (candidates, protected) = prune_plan(&hub, &stats, profile)?;
     let apply = a.flag("apply");
     let mut events = Vec::new();
     if apply && !candidates.is_empty() {
@@ -844,4 +851,202 @@ fn mentions(text: &str, name: &str) -> bool {
         let after = text[i + m.len()..].chars().next();
         !before.is_some_and(word) && !after.is_some_and(word)
     })
+}
+
+// ---- advise ----
+
+/// Short id the hub uses for a tool (`agent-foo-bar` → `foo_bar`).
+fn hub_short(id: &str) -> String {
+    id.trim_start_matches("agent-").replace('-', "_")
+}
+
+/// One actionable suggestion. `commands` are exactly what an agent runs to
+/// apply it; `needsHuman` marks steps an agent cannot finish alone.
+fn suggestion(
+    id: String,
+    kind: &str,
+    title: String,
+    reason: String,
+    commands: Vec<String>,
+    needs_human: bool,
+) -> Value {
+    json!({"id": id, "kind": kind, "title": title, "reason": reason, "commands": commands, "needsHuman": needs_human})
+}
+
+fn cmd_advise(ctx: &Ctx, a: &Args) -> Result<i32> {
+    a.check(&["days", "json"])?;
+    let config = ctx.config()?;
+    let report = doctor::run(&config, &ctx.paths)?;
+    let stats = usage::collect(&ctx.paths, days(a)?)?;
+    let mut out: Vec<Value> = Vec::new();
+
+    if report.blocked() {
+        let msgs: Vec<String> =
+            report.findings.iter().filter(|f| f.severity == "error").map(|f| f.message.clone()).collect();
+        out.push(suggestion(
+            "sync.blocked".into(),
+            "sync",
+            "Fix what blocks sync".into(),
+            msgs.join("; "),
+            vec![],
+            true,
+        ));
+    } else if !report.changes.is_empty() {
+        out.push(suggestion(
+            "sync".into(),
+            "sync",
+            format!("Sync {} pending change(s) to the agents", report.changes.len()),
+            "Agent configs or instructions differ from the Fusebox config.".into(),
+            vec!["fusebox reconcile".into()],
+            false,
+        ));
+    }
+    for name in &report.secrets.missing {
+        let users: Vec<&str> = config
+            .tools
+            .iter()
+            .filter(|t| t.enabled && t.required_secrets.contains(name))
+            .map(|t| t.id.as_str())
+            .collect();
+        out.push(suggestion(
+            format!("secret.{name}"),
+            "secret",
+            format!("Add the missing secret {name}"),
+            format!("Needed by {}; only the user can provide the value.", users.join(", ")),
+            vec![format!("fusebox secret set --stdin {name}   # value via stdin, never as an argument")],
+            true,
+        ));
+    }
+
+    // MCP servers: usage decides always-on vs on-demand vs off.
+    let skill_texts: Vec<(String, String)> = ctx
+        .hub()
+        .map(|h| enabled_everywhere(&h))
+        .unwrap_or_default()
+        .into_iter()
+        .map(|e| (e.name, std::fs::read_to_string(&e.skill_md).unwrap_or_default()))
+        .collect();
+    for tool in config.tools.iter().filter(|t| t.enabled) {
+        let mut u = stats.mcps.get(&tool.id).cloned().unwrap_or_default();
+        if let Some(h) = stats.mcps.get(&format!("agent-hub/{}", hub_short(&tool.id))) {
+            u.claude += h.claude;
+            u.codex += h.codex;
+            u.deepseek += h.deepseek;
+        }
+        let available: usize =
+            [("claude", tool.apps.claude), ("codex", tool.apps.codex), ("deepseek", tool.apps.deepseek)]
+                .iter()
+                .filter(|(_, on)| *on)
+                .map(|(k, _)| stats.sessions.get(*k).copied().unwrap_or(0))
+                .sum();
+        let untracked = tool.apps.hermes || tool.apps.claude_desktop;
+        let share = if available == 0 { 0.0 } else { u.total() as f64 / available as f64 };
+        let pinned: Vec<&str> = skill_texts
+            .iter()
+            .filter(|(_, text)| text.contains(&format!("mcp__{}__", tool.id)))
+            .map(|(n, _)| n.as_str())
+            .collect();
+        let rename_note = if pinned.is_empty() {
+            String::new()
+        } else {
+            format!(
+                " Skills that name its tools directly ({}) must switch to mcp__agent-hub__{}__<tool>.",
+                pinned.join(", "),
+                hub_short(&tool.id)
+            )
+        };
+        match tool.mode {
+            Mode::Direct if available > 0 && u.total() == 0 => out.push(suggestion(
+                format!("mcp.{}.idle", tool.id),
+                "mcp",
+                format!("{} was never used in {} days", tool.name, stats.days),
+                format!(
+                    "It starts with every session ({available} sessions) but no tool call was seen.{} Switch it to on demand, or turn it off.{rename_note}",
+                    if untracked { " Hermes/Claude Desktop usage is not tracked." } else { "" }
+                ),
+                vec![format!("fusebox mcp hub {}", tool.id), "fusebox reconcile".into()],
+                false,
+            )),
+            Mode::Direct if available >= 10 && share < 0.2 => out.push(suggestion(
+                format!("mcp.{}.hub", tool.id),
+                "mcp",
+                format!("Serve {} on demand", tool.name),
+                format!(
+                    "Used in {} of {available} sessions ({:.0}%); starting it only when needed saves a process per session.{rename_note}",
+                    u.total(),
+                    share * 100.0
+                ),
+                vec![format!("fusebox mcp hub {}", tool.id), "fusebox reconcile".into()],
+                false,
+            )),
+            Mode::Hub if available >= 10 && share > 0.5 => out.push(suggestion(
+                format!("mcp.{}.direct", tool.id),
+                "mcp",
+                format!("Keep {} always on", tool.name),
+                format!("Used in {:.0}% of sessions; a cold start on almost every session costs more than keeping it.", share * 100.0),
+                vec![format!("fusebox mcp direct {}", tool.id), "fusebox reconcile".into()],
+                false,
+            )),
+            _ => {}
+        }
+    }
+
+    // Skills: unused per profile, dependencies and `keep` lists protected.
+    if let Ok(hub) = ctx.hub() {
+        for profile in hub.profile_names() {
+            let Ok((candidates, protected)) = prune_plan(&hub, &stats, &profile) else { continue };
+            if candidates.is_empty() {
+                continue;
+            }
+            let kept: Vec<String> = protected
+                .iter()
+                .map(|p| format!("{} ({})", p["name"].as_str().unwrap_or(""), p["reason"].as_str().unwrap_or("")))
+                .collect();
+            let mut s = suggestion(
+                format!("skills.prune.{profile}"),
+                "skill",
+                format!("Turn off {} unused skill(s) in profile {profile}", candidates.len()),
+                format!(
+                    "No Claude Code, Codex or DeepSeek Harness session used them in {} days. Files stay on disk.{}",
+                    stats.days,
+                    if kept.is_empty() { String::new() } else { format!(" Kept: {}.", kept.join("; ")) }
+                ),
+                vec![format!("fusebox skills prune --profile {profile} --days {} --apply", stats.days)],
+                false,
+            );
+            s["items"] = json!(candidates);
+            out.push(s);
+        }
+    }
+
+    if a.flag("json") {
+        let payload = json!({
+            "days": stats.days,
+            "sessions": stats.sessions,
+            "suggestions": out,
+            "note": "Show these to the user and apply only what they approve; run each suggestion's commands in order.",
+        });
+        print(&(json_ordered(&payload) + "\n"));
+        return Ok(0);
+    }
+    if out.is_empty() {
+        print("Nothing to suggest: everything is synced and in use.\n");
+        return Ok(0);
+    }
+    for (i, s) in out.iter().enumerate() {
+        print(&format!(
+            "{}. {}\n   {}\n",
+            i + 1,
+            s["title"].as_str().unwrap_or(""),
+            s["reason"].as_str().unwrap_or("")
+        ));
+        if let Some(items) = s["items"].as_array() {
+            let names: Vec<&str> = items.iter().filter_map(Value::as_str).collect();
+            print(&format!("   items: {}\n", names.join(", ")));
+        }
+        for c in s["commands"].as_array().into_iter().flatten() {
+            print(&format!("   $ {}\n", c.as_str().unwrap_or("")));
+        }
+    }
+    Ok(0)
 }

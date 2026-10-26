@@ -14,6 +14,7 @@ path = "src/main.rs"
 [dependencies]
 serde_json = { version = "1", features = ["preserve_order", "arbitrary_precision"] }
 regex-lite = "0.1"
+ruzstd = { version = "0.8", default-features = false, features = ["std"] }
 toml = { version = "0.9", default-features = false, features = ["parse", "serde"] }
 
 [profile.release]

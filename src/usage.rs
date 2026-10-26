@@ -20,11 +20,30 @@ use serde_json::{Map, Value, json};
 use crate::paths::Paths;
 use crate::util::{Result, write_if_changed};
 
-const CACHE_VERSION: u64 = 1;
+const CACHE_VERSION: u64 = 2;
 
 static SKILL_MD_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"([A-Za-z0-9_.:-]+)/SKILL\.md").unwrap());
 static CLAUDE_SKILL_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#""name":"Skill","input":\{"skill":"([^"]+)""#).unwrap());
+/// MCP tool calls: `mcp__<server>__<tool>` (Claude Code, DeepSeek Harness)
+/// and `"server":"<server>","tool":` (Codex).
+static MCP_NAME_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#""(?:tool_use|tool-call)","id":"[^"]*","name":"mcp__([^"]+)""#).unwrap());
+static CODEX_MCP_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#""server":"([^"]+)","tool":""#).unwrap());
+
+/// Recorded as `mcp:<server>`; tools served through the hub are recorded as
+/// `mcp:agent-hub/<short-id>`.
+fn mcp_key(qualified: &str) -> Option<String> {
+    let mut parts = qualified.splitn(3, "__");
+    let server = parts.next()?;
+    if server == "agent-hub" {
+        return parts.next().map(|short| format!("mcp:agent-hub/{short}"));
+    }
+    Some(format!("mcp:{server}"))
+}
+
+static DSH_SKILL_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#""name":"skill","arguments":"\{\\"name\\":\s*\\"([^"\\]+)\\""#).unwrap());
 static CLAUDE_READ_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#""name":"Read","input":\{"file_path":"[^"]*?([A-Za-z0-9_.:-]+)/SKILL\.md""#).unwrap()
 });
@@ -33,6 +52,7 @@ static CLAUDE_READ_RE: LazyLock<Regex> = LazyLock::new(|| {
 pub enum Agent {
     Claude,
     Codex,
+    DeepSeek,
 }
 
 impl Agent {
@@ -40,6 +60,7 @@ impl Agent {
         match self {
             Agent::Claude => "claude",
             Agent::Codex => "codex",
+            Agent::DeepSeek => "deepseek",
         }
     }
 }
@@ -109,9 +130,43 @@ pub fn scan_file(agent: Agent, bytes: &[u8]) -> BTreeSet<String> {
                 }
             }
         }
+        Agent::DeepSeek => {
+            for line in lines_with(bytes, b"\"name\":\"skill\",\"arguments\"") {
+                let line = String::from_utf8_lossy(line);
+                found.extend(DSH_SKILL_RE.captures_iter(&line).map(|c| c[1].to_string()));
+            }
+        }
     }
     found.retain(|n| !n.is_empty() && n != "." && n != "..");
+    match agent {
+        Agent::Codex => {
+            for line in lines_with(bytes, b"\"server\":\"") {
+                let line = String::from_utf8_lossy(line);
+                found.extend(CODEX_MCP_RE.captures_iter(&line).map(|c| format!("mcp:{}", &c[1])));
+            }
+        }
+        Agent::Claude | Agent::DeepSeek => {
+            for line in lines_with(bytes, b"\"name\":\"mcp__") {
+                let line = String::from_utf8_lossy(line);
+                found.extend(MCP_NAME_RE.captures_iter(&line).filter_map(|c| mcp_key(&c[1])));
+            }
+        }
+    }
     found
+}
+
+/// Session logs are plain JSONL, except DeepSeek Harness which zstd-compresses them.
+fn read_log(path: &Path) -> std::io::Result<Vec<u8>> {
+    let raw = fs::read(path)?;
+    if path.extension().is_some_and(|x| x == "zstd") {
+        use std::io::Read;
+        let mut out = Vec::new();
+        ruzstd::decoding::StreamingDecoder::new(raw.as_slice())
+            .map_err(std::io::Error::other)?
+            .read_to_end(&mut out)?;
+        return Ok(out);
+    }
+    Ok(raw)
 }
 
 fn collect_jsonl(dir: &Path, out: &mut Vec<PathBuf>) {
@@ -120,7 +175,7 @@ fn collect_jsonl(dir: &Path, out: &mut Vec<PathBuf>) {
         let p = e.path();
         match e.file_type() {
             Ok(ft) if ft.is_dir() => collect_jsonl(&p, out),
-            Ok(ft) if ft.is_file() && p.extension().is_some_and(|x| x == "jsonl") => out.push(p),
+            Ok(ft) if ft.is_file() && p.extension().is_some_and(|x| x == "jsonl" || x == "zstd") => out.push(p),
             _ => {}
         }
     }
@@ -146,7 +201,11 @@ fn load_cache(path: &Path) -> BTreeMap<String, FileEntry> {
             Some((
                 k.clone(),
                 FileEntry {
-                    agent: if v["agent"] == "codex" { Agent::Codex } else { Agent::Claude },
+                    agent: match v["agent"].as_str() {
+                        Some("codex") => Agent::Codex,
+                        Some("deepseek") => Agent::DeepSeek,
+                        _ => Agent::Claude,
+                    },
                     size: v["size"].as_u64()?,
                     mtime: v["mtime"].as_i64()?,
                     skills: v["skills"].as_array()?.iter().filter_map(|s| s.as_str().map(String::from)).collect(),
@@ -171,12 +230,13 @@ fn save_cache(path: &Path, files: &BTreeMap<String, FileEntry>) -> Result<()> {
 pub struct SkillUse {
     pub claude: usize,
     pub codex: usize,
+    pub deepseek: usize,
     pub last_used: i64,
 }
 
 impl SkillUse {
     pub fn total(&self) -> usize {
-        self.claude + self.codex
+        self.claude + self.codex + self.deepseek
     }
 }
 
@@ -184,6 +244,8 @@ pub struct UsageStats {
     pub days: u64,
     pub sessions: BTreeMap<&'static str, usize>,
     pub skills: BTreeMap<String, SkillUse>,
+    /// MCP server id (or `agent-hub/<short>`) → sessions that called it.
+    pub mcps: BTreeMap<String, SkillUse>,
     pub scanned: usize,
     pub cached: usize,
 }
@@ -198,6 +260,7 @@ impl UsageStats {
             if key == name || dir.is_some_and(|d| key == d || short == d) {
                 total.claude += u.claude;
                 total.codex += u.codex;
+                total.deepseek += u.deepseek;
                 total.last_used = total.last_used.max(u.last_used);
             }
         }
@@ -213,6 +276,7 @@ pub fn collect(paths: &Paths, days: u64) -> Result<UsageStats> {
     let roots = [
         (Agent::Claude, paths.user_home.join(".claude").join("projects")),
         (Agent::Codex, paths.user_home.join(".codex").join("sessions")),
+        (Agent::DeepSeek, paths.dsh_home.join("sessions")),
     ];
     let mut files: Vec<(Agent, PathBuf, u64, i64)> = Vec::new();
     for (agent, root) in &roots {
@@ -251,7 +315,7 @@ pub fn collect(paths: &Paths, days: u64) -> Result<UsageStats> {
                     part.iter()
                         .map(|(agent, path, size, mtime, key)| {
                             let skills =
-                                fs::read(path).map(|b| scan_file(*agent, &b).into_iter().collect()).unwrap_or_default();
+                                read_log(path).map(|b| scan_file(*agent, &b).into_iter().collect()).unwrap_or_default();
                             (key.clone(), FileEntry { agent: *agent, size: *size, mtime: *mtime, skills })
                         })
                         .collect::<Vec<_>>()
@@ -264,14 +328,19 @@ pub fn collect(paths: &Paths, days: u64) -> Result<UsageStats> {
     if scanned > 0 || cached != cache.len() {
         save_cache(&cache_path, &fresh)?;
     }
-    let mut stats = UsageStats { days, sessions: BTreeMap::new(), skills: BTreeMap::new(), scanned, cached };
+    let mut stats =
+        UsageStats { days, sessions: BTreeMap::new(), skills: BTreeMap::new(), mcps: BTreeMap::new(), scanned, cached };
     for e in fresh.values() {
         *stats.sessions.entry(e.agent.key()).or_default() += 1;
         for name in &e.skills {
-            let u = stats.skills.entry(name.clone()).or_default();
+            let u = match name.strip_prefix("mcp:") {
+                Some(server) => stats.mcps.entry(server.to_string()).or_default(),
+                None => stats.skills.entry(name.clone()).or_default(),
+            };
             match e.agent {
                 Agent::Claude => u.claude += 1,
                 Agent::Codex => u.codex += 1,
+                Agent::DeepSeek => u.deepseek += 1,
             }
             u.last_used = u.last_used.max(e.mtime);
         }
@@ -338,6 +407,23 @@ mod tests {
         );
         let found = scan_file(Agent::Codex, log.as_bytes());
         assert_eq!(found.into_iter().collect::<Vec<_>>(), vec!["wechat-native"]);
+    }
+
+    #[test]
+    fn counts_mcp_servers_per_agent() {
+        let claude = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"mcp__agent-iphone12__pua_tap","input":{}},{"type":"tool_use","id":"t2","name":"mcp__agent-hub__rea__open_binary","input":{}}]}}"#;
+        let found = scan_file(Agent::Claude, claude.as_bytes());
+        assert!(found.contains("mcp:agent-iphone12") && found.contains("mcp:agent-hub/rea"));
+        let codex = r#"{"type":"event_msg","payload":{"type":"mcp_tool_call_end","invocation":{"server":"agent-rea","tool":"open_binary"}}}"#;
+        assert!(scan_file(Agent::Codex, codex.as_bytes()).contains("mcp:agent-rea"));
+    }
+
+    #[test]
+    fn scans_deepseek_skill_tool() {
+        let log =
+            r#"{"type":"tool-call","id":"c1","name":"skill","arguments":"{\"name\": \"reverse-engineer-anything\"}"}"#;
+        let found = scan_file(Agent::DeepSeek, log.as_bytes());
+        assert_eq!(found.into_iter().collect::<Vec<_>>(), vec!["reverse-engineer-anything"]);
     }
 
     #[test]
