@@ -5,8 +5,8 @@
 set -eu
 repo=$(cd "$(dirname "$0")/.." && pwd)
 src_home=${PARITY_SOURCE_HOME:-$HOME}
-src_agent=${PARITY_SOURCE_AGENT_HOME:-$HOME/.config/agent-switch}
-rust_bin=${RUST_BIN:-$repo/target/release/agent-switch}
+src_agent=${PARITY_SOURCE_AGENT_HOME:-$HOME/.config/fusebox}
+rust_bin=${RUST_BIN:-$repo/target/release/fusebox}
 work=$(cd "$(mktemp -d "${TMPDIR:-/tmp}/as-parity.XXXXXX")" && pwd -P)
 trap 'rm -rf "$work"' EXIT
 

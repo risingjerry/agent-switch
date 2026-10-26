@@ -1,4 +1,4 @@
-//! End-to-end test of `agent-switch hub` against a fake stdio MCP server.
+//! End-to-end test of `fusebox hub` against a fake stdio MCP server.
 
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
@@ -81,9 +81,9 @@ fn hub_is_lazy_scoped_reaps_and_reloads() {
     fs::write(home.join("secrets.env"), "FAKE_TOKEN=tok-1\nOTHER_SECRET=nope\n").unwrap();
     write_config(&home, &fixture, true);
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_agent-switch"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_fusebox"))
         .args(["--home", &home.to_string_lossy(), "--user-home", &root.to_string_lossy(), "hub", "claude"])
-        .env("AGENT_SWITCH_CACHE", root.join("cache"))
+        .env("FUSEBOX_CACHE", root.join("cache"))
         .env("OTHER_API_KEY", "must-not-leak")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

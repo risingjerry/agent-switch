@@ -367,7 +367,7 @@ fn global_profile_skills(hub: &Hub) -> Result<Vec<GlobalSkill>> {
         .collect()
 }
 
-const GLOBAL_README: &str = "# Global Skills Managed By Agent Switch\n\nDo not copy third-party or self-authored Skills here by hand. This global root is reserved for the OpenAI official Skill baseline plus explicit `profiles/global.json` entries. Use `agent-switch skills sync-global --prune` to restore or refresh it. Use project profiles for non-official Skills.\n";
+const GLOBAL_README: &str = "# Global Skills Managed By Fusebox\n\nDo not copy third-party or self-authored Skills here by hand. This global root is reserved for the OpenAI official Skill baseline plus explicit `profiles/global.json` entries. Use `fusebox skills sync-global --prune` to restore or refresh it. Use project profiles for non-official Skills.\n";
 
 pub fn sync_global(hub: &Hub, dry_run: bool, prune: bool) -> Result<Vec<String>> {
     let root = hub.global_root();
@@ -428,7 +428,7 @@ pub fn sync_global(hub: &Hub, dry_run: bool, prune: bool) -> Result<Vec<String>>
             );
         }
         let lock = json!({
-            "version": 3, "managedBy": "agent-switch", "policy": "openai-official-plus-global-profile",
+            "version": 3, "managedBy": "fusebox", "policy": "openai-official-plus-global-profile",
             "updatedAt": now, "skills": skills,
         });
         write_json(&root.parent().unwrap().join(".skill-lock.json"), &lock)?;
@@ -540,7 +540,7 @@ pub fn promote(hub: &Hub, source: &str, reference: &str) -> Result<()> {
 pub fn status_lines(hub: &Hub, agent_home: &Path) -> Vec<String> {
     let mut lines = vec![
         format!("Skill Hub: {}", hub.root.display()),
-        format!("Agent Switch: {}", agent_home.display()),
+        format!("Fusebox: {}", agent_home.display()),
         String::new(),
         "Sources:".into(),
     ];

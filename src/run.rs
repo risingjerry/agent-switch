@@ -13,7 +13,7 @@ use crate::util::Result;
 /// the tool's declared secrets and public env are added back.
 pub fn prepare(config: &Config, tool: &Tool, extra_args: &[String]) -> Result<(Vec<String>, BTreeMap<String, String>)> {
     let stored = secrets::read_all(&config.secret_file)
-        .map_err(|_| format!("Agent Switch could not read the secret store for {}", tool.id))?;
+        .map_err(|_| format!("Fusebox could not read the secret store for {}", tool.id))?;
     let missing: Vec<&str> = tool
         .required_secrets
         .iter()
@@ -21,7 +21,7 @@ pub fn prepare(config: &Config, tool: &Tool, extra_args: &[String]) -> Result<(V
         .map(String::as_str)
         .collect();
     if !missing.is_empty() {
-        return Err(format!("Agent Switch: {} missing required secret(s): {}", tool.id, missing.join(" ")));
+        return Err(format!("Fusebox: {} missing required secret(s): {}", tool.id, missing.join(" ")));
     }
     let mut env: BTreeMap<String, String> =
         std::env::vars().filter(|(k, _)| !stored.contains_key(k) && !SENSITIVE_NAME_RE.is_match(k)).collect();
@@ -52,7 +52,7 @@ pub fn exec(config: &Config, tool: &Tool, extra_args: &[String]) -> Result<()> {
     cmd.stdin(Stdio::inherit()).stdout(Stdio::inherit()).stderr(Stdio::inherit());
     let err = cmd.exec();
     if err.kind() == std::io::ErrorKind::NotFound {
-        return Err(format!("Agent Switch: {} command not found: {}", tool.id, tool.command));
+        return Err(format!("Fusebox: {} command not found: {}", tool.id, tool.command));
     }
-    Err(format!("Agent Switch: {} failed to start: {err}", tool.id))
+    Err(format!("Fusebox: {} failed to start: {err}", tool.id))
 }

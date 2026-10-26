@@ -66,7 +66,7 @@ pub fn agents(config: &Config, paths: &Paths) -> Result<Vec<Value>> {
 }
 
 const CLI_TARGETS: [(&str, &str, &str); 15] = [
-    ("agent-switch", "Agent Switch", "Agent Switch"),
+    ("fusebox", "Fusebox", "Homebrew / cargo"),
     ("codex", "Codex", "npm / app"),
     ("claude", "Claude Code", "native installer"),
     ("hermes", "Hermes", "installer"),

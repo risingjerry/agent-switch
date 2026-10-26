@@ -26,9 +26,14 @@ impl Paths {
     pub fn new(agent_home: Option<&str>, user_home: Option<&str>) -> Paths {
         let home = match agent_home {
             Some(h) => expand_user(h),
-            None => match std::env::var("AGENT_SWITCH_HOME") {
-                Ok(v) if !v.is_empty() => expand_user(&v),
-                _ => home_dir().join(".config").join("agent-switch"),
+            None => match env_any(&["FUSEBOX_HOME", "AGENT_SWITCH_HOME"]) {
+                Some(v) => expand_user(&v),
+                None => {
+                    // Installs from before the rename keep working until migrated.
+                    let current = home_dir().join(".config").join("fusebox");
+                    let legacy = home_dir().join(".config").join("agent-switch");
+                    if !current.exists() && legacy.exists() { legacy } else { current }
+                }
             },
         };
         let user = user_home.map(expand_user).unwrap_or_else(home_dir);
@@ -41,9 +46,9 @@ impl Paths {
             hermes_instructions: instructions.join("HERMES.md"),
             wrapper_dir: home.join("mcp").join("bin"),
             backup_dir: home.join("backups"),
-            cache_dir: match std::env::var("AGENT_SWITCH_CACHE") {
-                Ok(v) if !v.is_empty() => expand_user(&v),
-                _ => user.join(".cache").join("agent-switch"),
+            cache_dir: match env_any(&["FUSEBOX_CACHE", "AGENT_SWITCH_CACHE"]) {
+                Some(v) => expand_user(&v),
+                None => user.join(".cache").join("fusebox"),
             },
             claude_config: user.join(".claude.json"),
             claude_global_instructions: user.join(".claude").join("CLAUDE.md"),
@@ -65,6 +70,11 @@ impl Paths {
     pub fn targets_real_user(&self) -> bool {
         canonical(&self.user_home) == canonical(&home_dir())
     }
+}
+
+/// First non-empty variable; the AGENT_SWITCH_* names predate the rename.
+pub fn env_any(names: &[&str]) -> Option<String> {
+    names.iter().find_map(|n| std::env::var(n).ok().filter(|v| !v.is_empty()))
 }
 
 fn canonical(path: &Path) -> PathBuf {

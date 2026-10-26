@@ -110,7 +110,7 @@ impl Backend {
                     // Server-to-client requests (sampling, roots, elicitation)
                     // are not supported through the hub.
                     if let Some(id) = msg.get("id") {
-                        let reply = error(id, -32601, "not supported by agent-switch hub");
+                        let reply = error(id, -32601, "not supported by fusebox hub");
                         let _ = reader.write(&reply);
                     }
                     continue;
@@ -155,7 +155,7 @@ impl Backend {
         let init = self.request(
             "initialize",
             json!({"protocolVersion": protocol, "capabilities": {},
-                   "clientInfo": {"name": "agent-switch-hub", "version": env!("CARGO_PKG_VERSION")}}),
+                   "clientInfo": {"name": "fusebox-hub", "version": env!("CARGO_PKG_VERSION")}}),
             Some(Duration::from_secs(60)),
         )?;
         self.write(&json!({"jsonrpc": "2.0", "method": "notifications/initialized"}))?;
@@ -228,9 +228,8 @@ impl State {
     }
 
     fn instructions(&self) -> String {
-        let mut parts = vec![
-            "Tools named <server>__<tool> are served by Agent Switch; each server starts on first use.".to_string(),
-        ];
+        let mut parts =
+            vec!["Tools named <server>__<tool> are served by Fusebox; each server starts on first use.".to_string()];
         for tool in self.hub_tools() {
             if let Some(text) =
                 load_manifest(&self.paths, &tool.id).and_then(|m| m["instructions"].as_str().map(String::from))
@@ -448,7 +447,7 @@ pub fn serve(paths: Paths, config_path: PathBuf, app: String) -> crate::util::Re
                 let result = json!({
                     "protocolVersion": requested,
                     "capabilities": {"tools": {"listChanged": true}},
-                    "serverInfo": {"name": "agent-switch-hub", "version": env!("CARGO_PKG_VERSION")},
+                    "serverInfo": {"name": "fusebox-hub", "version": env!("CARGO_PKG_VERSION")},
                     "instructions": state.instructions(),
                 });
                 send(&state.out, &json!({"jsonrpc": "2.0", "id": id, "result": result}));
@@ -464,7 +463,7 @@ pub fn serve(paths: Paths, config_path: PathBuf, app: String) -> crate::util::Re
                     let reply = match state.call(&params) {
                         Ok(result) => json!({"jsonrpc": "2.0", "id": id, "result": result}),
                         Err(e) => json!({"jsonrpc": "2.0", "id": id, "result": {
-                            "content": [{"type": "text", "text": format!("agent-switch hub: {e}")}], "isError": true}}),
+                            "content": [{"type": "text", "text": format!("fusebox hub: {e}")}], "isError": true}}),
                     };
                     send(&state.out, &reply);
                 });

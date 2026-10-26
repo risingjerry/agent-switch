@@ -1,4 +1,4 @@
-//! agent-switch: one lightweight control plane for agent secrets, MCP servers,
+//! fusebox: one lightweight control plane for agent secrets, MCP servers,
 //! CLIs and Skills.
 
 mod config;
@@ -144,9 +144,9 @@ fn json_or_line(json: bool, payload: Value, line: &str) {
     if json { print(&(json_pretty(&payload) + "\n")) } else { print(&format!("{line}\n")) }
 }
 
-const USAGE: &str = "agent-switch — one control plane for agent secrets, MCP servers, CLIs and Skills
+const USAGE: &str = "fusebox — one control plane for agent secrets, MCP servers, CLIs and Skills
 
-Usage: agent-switch [--home DIR] [--user-home DIR] [--config FILE] <command>
+Usage: fusebox [--home DIR] [--user-home DIR] [--config FILE] <command>
 
   status | doctor [--json] [--strict]   show drift, missing secrets, findings
   reconcile [--json] [--dry-run]        write native configs, wrappers, instructions
@@ -168,7 +168,7 @@ fn main() {
     let code = match dispatch(&argv) {
         Ok(code) => code,
         Err(e) => {
-            eprintln!("agent-switch: {e}");
+            eprintln!("fusebox: {e}");
             2
         }
     };
@@ -187,7 +187,7 @@ fn dispatch(argv: &[String]) -> Result<i32> {
     }
     let args = Args::parse(argv)?;
     if args.flag("version") {
-        print(&format!("agent-switch {}\n", env!("CARGO_PKG_VERSION")));
+        print(&format!("fusebox {}\n", env!("CARGO_PKG_VERSION")));
         return Ok(0);
     }
     if args.flag("help") || args.pos.is_empty() {
@@ -403,7 +403,7 @@ fn cmd_mcp(ctx: &Ctx, a: &Args) -> Result<i32> {
             let mut line = format!("{verb} {id}");
             if sub == "hub" && tool.enabled {
                 match hub::warm(&ctx.paths, &updated, tool) {
-                    Ok(n) => line.push_str(&format!("; cached {n} tool(s); run `agent-switch reconcile`")),
+                    Ok(n) => line.push_str(&format!("; cached {n} tool(s); run `fusebox reconcile`")),
                     Err(e) => {
                         line.push_str(&format!("; tool list not cached yet ({e}); the hub retries on first start"))
                     }
@@ -479,7 +479,7 @@ fn cmd_mcp_import(ctx: &Ctx, a: &Args) -> Result<i32> {
         adopted = imports::adopt(&ctx.paths, natives)?;
         let (summary, post) = doctor::apply(&updated, &ctx.paths)?;
         if post.blocked() {
-            return Err("MCPs were imported but reconciliation is blocked; run agent-switch doctor".into());
+            return Err("MCPs were imported but reconciliation is blocked; run fusebox doctor".into());
         }
         sync = summary.to_value();
     }
@@ -612,24 +612,20 @@ fn cmd_skills(ctx: &Ctx, a: &Args) -> Result<i32> {
             let source = a.pos(1, "SOURCE")?;
             let to = a.one("to").ok_or("--to REF is required")?;
             skills::promote(&ctx.hub()?, source, to)?;
-            print(&format!(
-                "promoted {source} to {to}; run `agent-switch skills fetch {source}` to refresh the lock\n"
-            ));
+            print(&format!("promoted {source} to {to}; run `fusebox skills fetch {source}` to refresh the lock\n"));
         }
         "enable" => {
             a.check(&["source", "path"])?;
             let (profile, name) = (a.pos(1, "PROFILE")?, a.pos(2, "SKILL")?);
             let source = a.one("source").ok_or("--source is required")?;
             skills::enable(&ctx.hub()?, profile, name, source, a.one("path"))?;
-            print(&format!("enabled {name} in profile {profile}; run `agent-switch skills sync {profile} --prune`\n"));
+            print(&format!("enabled {name} in profile {profile}; run `fusebox skills sync {profile} --prune`\n"));
         }
         "disable" => {
             a.check(&[])?;
             let (profile, name) = (a.pos(1, "PROFILE")?, a.pos(2, "SKILL")?);
             if skills::disable(&ctx.hub()?, profile, name)? {
-                print(&format!(
-                    "disabled {name} in profile {profile}; run `agent-switch skills sync {profile} --prune`\n"
-                ));
+                print(&format!("disabled {name} in profile {profile}; run `fusebox skills sync {profile} --prune`\n"));
             } else {
                 print(&format!("{name} was not enabled in profile {profile}\n"));
             }
@@ -749,10 +745,7 @@ fn cmd_skills_usage(ctx: &Ctx, a: &Args) -> Result<i32> {
         ));
     }
     let unused = rows.iter().filter(|r| r["claude"] == 0 && r["codex"] == 0).count();
-    print(&format!(
-        "\n{unused} of {} enabled skills unused in this window; see `agent-switch skills prune`.\n",
-        rows.len()
-    ));
+    print(&format!("\n{unused} of {} enabled skills unused in this window; see `fusebox skills prune`.\n", rows.len()));
     Ok(0)
 }
 
