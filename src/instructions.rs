@@ -43,12 +43,13 @@ Secrets and MCP:
 - Secrets live only in `{secrets}`; never in project `.env`, README, native app configs, chats, shell history, or logs. Never print a secret value unless the user explicitly asks for a local-only diagnostic and redaction is impossible.
 - Write with `fusebox secret set --stdin NAME` (or `--fd N`), never as a command argument; read only via `fusebox secret get --fd N NAME` into a non-TTY descriptor; list names with `fusebox secret list`.
 - `{config}` is the central tool config. Run `fusebox doctor` before MCP/tool changes and `fusebox reconcile` to regenerate native configs. Generated MCP entries stay in the `agent-*` namespace. A new provider gets only its secret name in config.
-- MCPs in hub mode start on first use and stop when idle: `fusebox mcp hub ID` / `fusebox mcp direct ID`.
+- Every MCP server is either resident or on demand. On-demand servers run behind the `agent-hub` MCP: use its `fusebox_servers` tool to see them (pass `server` to start one and list its tools) and `fusebox_call` to call a tool. Switch with `fusebox mcp direct ID` / `fusebox mcp hub ID`, then `fusebox reconcile`.
 
 Skills (sources in `{hub}`):
-- Inspect with `fusebox skills status`; `fusebox skills usage` shows what each agent actually used.
-- A downloaded Skill is dormant until enabled for a project profile or the `global` profile: `fusebox skills enable PROFILE SKILL --source SOURCE --path PATH` / `fusebox skills disable PROFILE SKILL`, then `fusebox skills sync PROFILE --prune`.
-- Only on an explicit user request run `fusebox skills sync-global --prune` or `fusebox skills prune --apply`. If unexpected global Skills appear, report them without changing activation and do not block unrelated tasks.
+- Every Skill is either resident (in your skill list) or on demand. When no listed skill fits a task, run `fusebox skills search WORDS`; if one fits, run `fusebox skills show NAME` and follow it.
+- Inspect with `fusebox skills status`; `fusebox skills usage` shows what each agent actually used; `fusebox advise` suggests what to make resident or on demand.
+- Make a skill resident with `fusebox skills enable PROFILE SKILL` (PROFILE is `global` or a project), on demand with `fusebox skills disable PROFILE SKILL`, or resident only in one project with `fusebox skills move SKILL --to PROJECT`. These sync immediately.
+- Apply `fusebox advise` suggestions only after the user approves them. If unexpected global Skills appear, report them without changing activation and do not block unrelated tasks.
 - Third-party Skills live once under `vendor/` with a locked commit; self-authored ones in Git-managed `own/` or their own repos. `{global_skills}` is generated output: never copy Skills there by hand. Do not run broad global installs such as `skills add ... -g --all` unless asked.
 - Never store credentials in Skill files, Skill references, Skill scripts, registry files, lock files, or audit reports.
 "

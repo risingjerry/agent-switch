@@ -1,11 +1,18 @@
 ---
 name: fusebox
-description: Manage this machine's agent setup through the local `fusebox` CLI — MCP servers (always on / on demand / off), Skills (enable, disable, clean up unused), secrets (names only) and sync to Claude Code, Codex, DeepSeek Harness and Hermes. Use when the user asks what to clean up or optimise, which Skills or MCP servers to turn off or switch to on demand, why a tool or skill is missing, how much each skill is used, or to add/rotate an API key. Not for editing project code.
+description: Manage this machine's agent setup through the local `fusebox` CLI — every MCP server and Skill is either resident or on demand, globally or per project; plus secrets (names only) and sync to Claude Code, Codex, DeepSeek Harness and Hermes. Use when the user asks what to optimise or clean up, which Skills or MCP servers should be resident or on demand, why a tool or skill is missing, how much each is used, or to add/rotate an API key. Also use to find an on-demand skill for the current task (`fusebox skills search`). Not for editing project code.
 ---
 
 # Fusebox
 
 Fusebox is the single place this machine keeps agent secrets, MCP servers and Skills. The user watches it in the Fusebox app; **you** make the changes, through the CLI, after the user agrees.
+
+## Two states, nothing is ever "off"
+
+- **Resident**: loaded into every session (globally, or only in one project). For a Skill: in your skill list. For an MCP: started with the session.
+- **On demand**: costs nothing until needed, but always reachable.
+  - Skill → `fusebox skills search WORDS`, then `fusebox skills show NAME` and follow it.
+  - MCP → the `agent-hub` MCP: `fusebox_servers` lists them (pass `server` to start one and see its tools), `fusebox_call` calls a tool.
 
 ## Read first
 
@@ -27,10 +34,11 @@ Fusebox is the single place this machine keeps agent secrets, MCP servers and Sk
 
 ## Making changes
 
-- MCP mode: `fusebox mcp direct ID` (always on), `fusebox mcp hub ID` (on demand: starts on first use, stops when idle), `fusebox mcp disable ID` (off), `fusebox mcp enable ID`. Then `fusebox reconcile`.
+- MCP: `fusebox mcp direct ID` (resident) or `fusebox mcp hub ID` (on demand; add `--no-warm` for servers that open a login page on start). Then `fusebox reconcile`.
 - Turning on demand renames tools to `mcp__agent-hub__<short-id>__<tool>`; `advise` names the Skills that hard-code the old names — update those Skills too.
 - Which agents get an MCP: `fusebox mcp set ID --command ... --app claude --app codex --app deepseek ...` (repeat `--app`; omitting all means every agent).
-- Skills: `fusebox skills disable PROFILE NAME` / `fusebox skills enable PROFILE NAME --source SOURCE --path PATH`, then `fusebox skills sync PROFILE --prune` (`global` profile → `fusebox skills sync-global --prune`). Bulk: `fusebox skills prune --profile PROFILE --apply` (dry run without `--apply`). Disabling never deletes files.
+- Skills (sync happens automatically): resident with `fusebox skills enable PROFILE NAME...`, on demand with `fusebox skills disable PROFILE NAME...`, resident only in one project with `fusebox skills move NAME --to PROJECT`. PROFILE is `global` or a project profile (`fusebox skills status` lists them). Files are never deleted.
+- Profiles may pin skills in their `keep` list; `advise` never suggests moving those.
 - Always finish MCP changes with `fusebox reconcile`.
 
 ## Secrets — hard rules

@@ -27,6 +27,7 @@ use util::{Result, json_ordered, json_pretty};
 
 const VALUE_OPTS: &[&str] = &[
     "lang",
+    "limit",
     "home",
     "user-home",
     "config",
@@ -388,7 +389,7 @@ fn cmd_mcp(ctx: &Ctx, a: &Args) -> Result<i32> {
             Ok(0)
         }
         "enable" | "disable" | "hub" | "direct" => {
-            a.check(&["json"])?;
+            a.check(&["json", "no-warm"])?;
             let id = config::normalize_tool_id(a.pos(1, "MCP id")?)?;
             let (updated, r) = ctx.update(|c| match sub {
                 "enable" => config::set_enabled(c, &id, true),
@@ -404,7 +405,7 @@ fn cmd_mcp(ctx: &Ctx, a: &Args) -> Result<i32> {
                 _ => "direct",
             };
             let mut line = format!("{verb} {id}");
-            if sub == "hub" && tool.enabled {
+            if sub == "hub" && tool.enabled && !a.flag("no-warm") {
                 match hub::warm(&ctx.paths, &updated, tool) {
                     Ok(n) => line.push_str(&format!("; cached {n} tool(s); run `fusebox reconcile`")),
                     Err(e) => {
@@ -617,21 +618,67 @@ fn cmd_skills(ctx: &Ctx, a: &Args) -> Result<i32> {
             skills::promote(&ctx.hub()?, source, to)?;
             print(&format!("promoted {source} to {to}; run `fusebox skills fetch {source}` to refresh the lock\n"));
         }
+        // Resident in PROFILE. --source/--path are optional when the name is
+        // unambiguous in the catalog.
         "enable" => {
-            a.check(&["source", "path"])?;
-            let (profile, name) = (a.pos(1, "PROFILE")?, a.pos(2, "SKILL")?);
-            let source = a.one("source").ok_or("--source is required")?;
-            skills::enable(&ctx.hub()?, profile, name, source, a.one("path"))?;
-            print(&format!("enabled {name} in profile {profile}; run `fusebox skills sync {profile} --prune`\n"));
-        }
-        "disable" => {
-            a.check(&[])?;
-            let (profile, name) = (a.pos(1, "PROFILE")?, a.pos(2, "SKILL")?);
-            if skills::disable(&ctx.hub()?, profile, name)? {
-                print(&format!("disabled {name} in profile {profile}; run `fusebox skills sync {profile} --prune`\n"));
-            } else {
-                print(&format!("{name} was not enabled in profile {profile}\n"));
+            a.check(&["source", "path", "no-sync"])?;
+            let profile = a.pos(1, "PROFILE")?;
+            let hub = ctx.hub()?;
+            let names = &a.pos[2..];
+            if names.is_empty() {
+                return Err("usage: fusebox skills enable PROFILE SKILL... [--source S --path P]".into());
             }
+            let catalog = skills::catalog(&ctx.hub_root())?;
+            for name in names {
+                let (source, path) = match a.one("source") {
+                    Some(s) => (s.to_string(), a.one("path").unwrap_or(name).to_string()),
+                    None => catalog
+                        .iter()
+                        .find(|e| &e.name == name)
+                        .and_then(|e| e.id.split_once(':').map(|(s, p)| (s.to_string(), p.to_string())))
+                        .ok_or_else(|| format!("no skill named {name}; pass --source and --path"))?,
+                };
+                skills::enable(&hub, profile, name, &source, Some(&path))?;
+                print(&format!("{name}: resident in {profile}\n"));
+            }
+            if !a.flag("no-sync") {
+                skills::sync_any(&hub, profile)?;
+            }
+        }
+        // On demand: removed from PROFILE's catalog, still findable by search.
+        "disable" => {
+            a.check(&["no-sync"])?;
+            let profile = a.pos(1, "PROFILE")?;
+            let hub = ctx.hub()?;
+            let names = &a.pos[2..];
+            if names.is_empty() {
+                return Err("usage: fusebox skills disable PROFILE SKILL...".into());
+            }
+            for name in names {
+                let changed = skills::disable(&hub, profile, name)?;
+                print(&format!(
+                    "{name}: {}\n",
+                    if changed { format!("on demand in {profile}") } else { format!("was not resident in {profile}") }
+                ));
+            }
+            if !a.flag("no-sync") {
+                skills::sync_any(&hub, profile)?;
+            }
+        }
+        // Resident only in --to (taken off --from, default global).
+        "move" => {
+            a.check(&["to", "from"])?;
+            let name = a.pos(1, "SKILL")?;
+            let to = a.one("to").ok_or("--to PROFILE is required")?;
+            let from = a.one("from").unwrap_or("global");
+            let hub = ctx.hub()?;
+            let (source, path) =
+                skills::profile_entry(&hub, from, name).ok_or_else(|| format!("{name} is not resident in {from}"))?;
+            skills::enable(&hub, to, name, &source, Some(&path))?;
+            skills::disable(&hub, from, name)?;
+            skills::sync_any(&hub, to)?;
+            skills::sync_any(&hub, from)?;
+            print(&format!("{name}: resident in {to}, on demand elsewhere\n"));
         }
         "sync" => {
             a.check(&["prune", "dry-run"])?;
@@ -656,6 +703,62 @@ fn cmd_skills(ctx: &Ctx, a: &Args) -> Result<i32> {
             }
         }
         "usage" => return cmd_skills_usage(ctx, a),
+        "search" => {
+            a.check(&["json", "limit"])?;
+            let query = a.pos[1..].join(" ");
+            if query.trim().is_empty() {
+                return Err("usage: fusebox skills search WORDS".into());
+            }
+            let catalog = skills::catalog(&ctx.hub_root())?;
+            let limit = a.one("limit").and_then(|v| v.parse().ok()).unwrap_or(8);
+            let hits = skills::search(&catalog, &query, limit);
+            if json {
+                let rows: Vec<Value> = hits
+                    .iter()
+                    .map(|(e, score)| {
+                        json!({
+                            "name": e.name, "id": e.id, "description": e.description, "score": score,
+                            "skillMd": e.skill_md.to_string_lossy(), "residentIn": e.profiles,
+                        })
+                    })
+                    .collect();
+                print(&(json_ordered(&json!({"query": query, "results": rows})) + "\n"));
+            } else if hits.is_empty() {
+                print(&format!("No skill matches \"{query}\".\n"));
+            } else {
+                for (e, _) in &hits {
+                    let state = if e.profiles.is_empty() { "on demand".to_string() } else { e.profiles.join(",") };
+                    let desc: String = e.description.chars().take(160).collect();
+                    print(&format!("{}  [{state}]\n    {desc}\n", e.name));
+                }
+                print("\nLoad one with: fusebox skills show NAME\n");
+            }
+        }
+        "show" => {
+            a.check(&["json"])?;
+            let want = a.pos(1, "skill NAME")?;
+            let catalog = skills::catalog(&ctx.hub_root())?;
+            let entry = catalog
+                .iter()
+                .find(|e| e.name == want || e.id == want)
+                .ok_or_else(|| format!("no skill named {want}; try `fusebox skills search WORDS`"))?;
+            let content = std::fs::read_to_string(&entry.skill_md).map_err(|e| e.to_string())?;
+            let dir = entry.skill_md.parent().unwrap_or(std::path::Path::new("."));
+            if json {
+                print(
+                    &(json_ordered(&json!({
+                        "name": entry.name, "dir": dir.to_string_lossy(), "skillMd": entry.skill_md.to_string_lossy(),
+                        "content": content,
+                    })) + "\n"),
+                );
+            } else {
+                print(&format!(
+                    "<!-- skill {} — resources are relative to {} -->\n{content}",
+                    entry.name,
+                    dir.display()
+                ));
+            }
+        }
         "prune" => return cmd_skills_prune(ctx, a),
         other => return Err(format!("unknown skills subcommand: {other}")),
     }
@@ -984,11 +1087,11 @@ fn cmd_advise(ctx: &Ctx, a: &Args) -> Result<i32> {
                 tr(format!("{name} was never used in {} days", stats.days), format!("{name} {} 天里一次都没用过", stats.days)),
                 tr(
                     format!(
-                        "It starts with every session ({available} sessions) but no tool call was seen.{} Switch it to on demand, or turn it off.{rename_note}",
+                        "It starts with every session ({available} sessions) but no tool call was seen.{} Switch it to on demand.{rename_note}",
                         if untracked { " Hermes/Claude Desktop usage is not tracked." } else { "" }
                     ),
                     format!(
-                        "每个会话都会启动它（共 {available} 个），但从没调用过它的工具。{}建议改成按需，或者关掉。{rename_note}",
+                        "每个会话都会启动它（共 {available} 个），但从没调用过它的工具。{}建议改成按需。{rename_note}",
                         if untracked { "Hermes / Claude Desktop 里的使用统计不到。" } else { "" }
                     ),
                 ),
@@ -1025,53 +1128,190 @@ fn cmd_advise(ctx: &Ctx, a: &Args) -> Result<i32> {
         }
     }
 
-    // Skills: unused per profile, dependencies and `keep` lists protected.
+    // Skills: two states — resident (in a profile's catalog) or on demand
+    // (found via `fusebox skills search`). Use is attributed to projects by
+    // each session's working directory.
     if let Ok(hub) = ctx.hub() {
-        for profile in hub.profile_names() {
-            let Ok((candidates, protected)) = prune_plan(&hub, &stats, &profile) else { continue };
-            if candidates.is_empty() {
-                continue;
-            }
-            let kept: Vec<String> = protected
+        let roots = skills::project_roots(&hub);
+        let project_of = |cwd: &str| -> Option<String> {
+            roots
                 .iter()
-                .map(|p| {
-                    let reason = p["reason"].as_str().unwrap_or("");
-                    let reason = if !zh {
-                        reason.to_string()
-                    } else if let Some(users) = reason.strip_prefix("used by ") {
-                        format!("{users} 用到它")
-                    } else if reason == "enabled recently" {
-                        "刚启用".into()
-                    } else {
-                        "在保留名单里".into()
-                    };
-                    format!("{} ({reason})", p["name"].as_str().unwrap_or(""))
+                .filter(|(_, root)| !cwd.is_empty() && std::path::Path::new(cwd).starts_with(root))
+                .max_by_key(|(_, root)| root.as_os_str().len())
+                .map(|(n, _)| n.clone())
+        };
+        let by_project = |u: &usage::SkillUse| -> BTreeMap<Option<String>, usize> {
+            let mut m = BTreeMap::new();
+            for (cwd, n) in &u.cwds {
+                *m.entry(project_of(cwd)).or_default() += n;
+            }
+            m
+        };
+        let enabled_all = enabled_everywhere(&hub);
+        let texts: Vec<(String, String)> = enabled_all
+            .iter()
+            .map(|e| (e.name.clone(), std::fs::read_to_string(&e.skill_md).unwrap_or_default()))
+            .collect();
+        let used = |name: &str, md: &std::path::Path| stats.lookup(name, dir_name(md).as_deref());
+        // A resident skill another used resident skill mentions is a dependency.
+        let depended_on = |name: &str| -> Vec<String> {
+            texts
+                .iter()
+                .filter(|(other, text)| other != name && mentions(text, name))
+                .filter(|(other, _)| {
+                    enabled_all.iter().find(|e| &e.name == other).is_some_and(|e| used(other, &e.skill_md).total() > 0)
                 })
-                .collect();
-            let mut s = suggestion(
-                format!("skills.prune.{profile}"),
-                "skill",
-                tr(
-                    format!("Turn off {} unused skill(s) in profile {profile}", candidates.len()),
-                    format!("停用 {profile} 里 {} 个没用过的 Skill", candidates.len()),
-                ),
-                tr(
-                    format!(
-                        "No Claude Code, Codex or DeepSeek Harness session used them in {} days. Files stay on disk.{}",
-                        stats.days,
-                        if kept.is_empty() { String::new() } else { format!(" Kept: {}.", kept.join("; ")) }
+                .map(|(o, _)| o.clone())
+                .collect()
+        };
+        for profile in hub.profile_names() {
+            let keep = skills::profile_keep(&hub, &profile);
+            let fresh = skills::recently_enabled(&hub, &profile, stats.days);
+            let mut to_demand = Vec::new();
+            let mut kept = Vec::new();
+            for (name, md) in skills::enabled_skills(&hub, &profile).unwrap_or_default() {
+                let u = used(&name, &md);
+                let projects = by_project(&u);
+                let here = if profile == "global" {
+                    u.total()
+                } else {
+                    projects.get(&Some(profile.clone())).copied().unwrap_or(0)
+                };
+                if keep.contains(&name) || fresh.contains(&name) {
+                    if here == 0 {
+                        kept.push(format!(
+                            "{name} ({})",
+                            if fresh.contains(&name) {
+                                tr("new".into(), "刚启用".into())
+                            } else {
+                                tr("pinned".into(), "固定保留".into())
+                            }
+                        ));
+                    }
+                    continue;
+                }
+                if here == 0 {
+                    let deps = depended_on(&name);
+                    if deps.is_empty() {
+                        to_demand.push(name);
+                    } else {
+                        kept.push(format!(
+                            "{name} ({})",
+                            tr(format!("used by {}", deps.join(", ")), format!("{} 用到它", deps.join("、")))
+                        ));
+                    }
+                    continue;
+                }
+                // Global skill used in exactly one project and nowhere else:
+                // make it resident only there.
+                if profile == "global"
+                    && projects.len() == 1
+                    && u.total() >= 5
+                    && let Some(Some(target)) = projects.keys().next()
+                {
+                    out.push(suggestion(
+                        format!("skills.move.{name}"),
+                        "skill",
+                        tr(format!("Keep {name} resident only in {target}"), format!("{name} 只在 {target} 项目常驻")),
+                        tr(
+                            format!(
+                                "All {} uses in {} days were in {target}; elsewhere it can load on demand.",
+                                u.total(),
+                                stats.days
+                            ),
+                            format!(
+                                "{} 天里 {} 次使用全在 {target}；其他地方改成按需，用到再调出来。",
+                                stats.days,
+                                u.total()
+                            ),
+                        ),
+                        vec![format!("fusebox skills move {name} --to {target}")],
+                        false,
+                    ));
+                }
+            }
+            if !to_demand.is_empty() {
+                let scope =
+                    if profile == "global" { tr("everywhere".into(), "全局".into()) } else { profile.clone() };
+                let commands = vec![format!("fusebox skills disable {profile} {}", to_demand.join(" "))];
+                let mut s = suggestion(
+                    format!("skills.ondemand.{profile}"),
+                    "skill",
+                    tr(
+                        format!("Make {} unused skill(s) on demand ({scope})", to_demand.len()),
+                        format!("{scope} 里 {} 个没用过的 Skill 改成按需", to_demand.len()),
                     ),
-                    format!(
-                        "最近 {} 天 Claude Code、Codex、DeepSeek Harness 都没用过。停用后文件还在。{}",
-                        stats.days,
-                        if kept.is_empty() { String::new() } else { format!("保留：{}。", kept.join("；")) }
+                    tr(
+                        format!(
+                            "Not used here in {} days. On demand they stop costing context in every session; agents still find them with `fusebox skills search`.{}",
+                            stats.days,
+                            if kept.is_empty() {
+                                String::new()
+                            } else {
+                                format!(" Kept resident: {}.", kept.join("; "))
+                            }
+                        ),
+                        format!(
+                            "最近 {} 天在这里没用过。改成按需后不再占每个会话的上下文，需要时 Agent 用 `fusebox skills search` 照样能找到。{}",
+                            stats.days,
+                            if kept.is_empty() {
+                                String::new()
+                            } else {
+                                format!("继续常驻：{}。", kept.join("；"))
+                            }
+                        ),
                     ),
-                ),
-                vec![format!("fusebox skills prune --profile {profile} --days {} --apply", stats.days)],
-                false,
-            );
-            s["items"] = json!(candidates);
-            out.push(s);
+                    commands,
+                    false,
+                );
+                s["items"] = json!(to_demand);
+                out.push(s);
+            }
+        }
+        // On-demand skills that keep getting loaded: make them resident where used.
+        if let Ok(catalog) = skills::catalog(&ctx.hub_root()) {
+            let mut seen = BTreeSet::new();
+            for e in catalog.iter().filter(|e| e.profiles.is_empty()) {
+                if !seen.insert(e.name.clone()) {
+                    continue;
+                }
+                let u = used(&e.name, &e.skill_md);
+                // Only loads after it went on demand count; earlier use was
+                // while it was resident.
+                let loads = match skills::on_demand_since(&hub, &e.name) {
+                    Some(date) => u.since(&date),
+                    None => u.total(),
+                };
+                if loads < 3 {
+                    continue;
+                }
+                let projects = by_project(&u);
+                let target = match (projects.len(), projects.keys().next()) {
+                    (1, Some(Some(p))) => p.clone(),
+                    _ => "global".to_string(),
+                };
+                let (source, path) =
+                    e.id.split_once(':').map(|(a, b)| (a.to_string(), b.to_string())).unwrap_or_default();
+                let sync = if target == "global" {
+                    "fusebox skills sync-global --prune".to_string()
+                } else {
+                    format!("fusebox skills sync {target} --prune")
+                };
+                out.push(suggestion(
+                    format!("skills.resident.{}", e.name),
+                    "skill",
+                    tr(format!("Make {} resident in {target}", e.name), format!("{} 在 {target} 改成常驻", e.name)),
+                    tr(
+                        format!(
+                            "Loaded on demand in {} sessions; keeping it listed saves a lookup each time.",
+                            u.total()
+                        ),
+                        format!("按需调用了 {} 次；常驻后每次能省一次查找。", u.total()),
+                    ),
+                    vec![format!("fusebox skills enable {target} {} --source {source} --path {path}", e.name), sync],
+                    false,
+                ));
+            }
         }
     }
 

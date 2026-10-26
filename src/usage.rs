@@ -20,7 +20,7 @@ use serde_json::{Map, Value, json};
 use crate::paths::Paths;
 use crate::util::{Result, write_if_changed};
 
-const CACHE_VERSION: u64 = 3;
+const CACHE_VERSION: u64 = 4;
 
 static SKILL_MD_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"([A-Za-z0-9_.:-]+)/SKILL\.md").unwrap());
 static CLAUDE_SKILL_RE: LazyLock<Regex> =
@@ -98,6 +98,20 @@ fn lines_with<'a>(hay: &'a [u8], needle: &'a [u8]) -> Vec<&'a [u8]> {
     out
 }
 
+/// First `"cwd":"…"` in a session log: Claude Code, Codex and DeepSeek
+/// Harness all record the working directory near the top.
+pub fn session_cwd(bytes: &[u8]) -> String {
+    let needle = b"\"cwd\":\"";
+    let Some(at) = find_all(bytes, needle).next() else { return String::new() };
+    let rest = &bytes[at + needle.len()..];
+    let end = rest.iter().position(|&b| b == b'"').unwrap_or(0);
+    String::from_utf8_lossy(&rest[..end]).into_owned()
+}
+
+/// On-demand skills are loaded with `fusebox skills show NAME`; count those
+/// like direct invocations.
+static SHOW_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"fusebox skills show ([A-Za-z0-9_.:-]+)").unwrap());
+
 pub fn scan_file(agent: Agent, bytes: &[u8]) -> BTreeSet<String> {
     let mut found = BTreeSet::new();
     match agent {
@@ -135,6 +149,14 @@ pub fn scan_file(agent: Agent, bytes: &[u8]) -> BTreeSet<String> {
                 let line = String::from_utf8_lossy(line);
                 found.extend(DSH_SKILL_RE.captures_iter(&line).map(|c| c[1].to_string()));
             }
+        }
+    }
+    for line in lines_with(bytes, b"fusebox skills show ") {
+        let line = String::from_utf8_lossy(line);
+        let is_call =
+            ["\"tool_use\"", "\"tool-call\"", "function_call", "custom_tool_call"].iter().any(|m| line.contains(m));
+        if is_call {
+            found.extend(SHOW_RE.captures_iter(&line).map(|c| c[1].to_string()));
         }
     }
     found.retain(|n| !n.is_empty() && n != "." && n != "..");
@@ -189,6 +211,8 @@ struct FileEntry {
     size: u64,
     mtime: i64,
     skills: Vec<String>,
+    /// Working directory of the session, used to attribute use to projects.
+    cwd: String,
 }
 
 fn load_cache(path: &Path) -> BTreeMap<String, FileEntry> {
@@ -212,6 +236,7 @@ fn load_cache(path: &Path) -> BTreeMap<String, FileEntry> {
                     size: v["size"].as_u64()?,
                     mtime: v["mtime"].as_i64()?,
                     skills: v["skills"].as_array()?.iter().filter_map(|s| s.as_str().map(String::from)).collect(),
+                    cwd: v["cwd"].as_str().unwrap_or("").to_string(),
                 },
             ))
         })
@@ -221,7 +246,10 @@ fn load_cache(path: &Path) -> BTreeMap<String, FileEntry> {
 fn save_cache(path: &Path, files: &BTreeMap<String, FileEntry>) -> Result<()> {
     let mut map = Map::new();
     for (k, e) in files {
-        map.insert(k.clone(), json!({"agent": e.agent.key(), "size": e.size, "mtime": e.mtime, "skills": e.skills}));
+        map.insert(
+            k.clone(),
+            json!({"agent": e.agent.key(), "size": e.size, "mtime": e.mtime, "skills": e.skills, "cwd": e.cwd}),
+        );
     }
     if let Some(parent) = path.parent() {
         crate::util::ensure_private_dir(parent);
@@ -235,11 +263,20 @@ pub struct SkillUse {
     pub codex: usize,
     pub deepseek: usize,
     pub last_used: i64,
+    /// Session working directory → sessions that used it there.
+    pub cwds: BTreeMap<String, usize>,
+    /// Modification time of every session that used it.
+    pub times: Vec<i64>,
 }
 
 impl SkillUse {
     pub fn total(&self) -> usize {
         self.claude + self.codex + self.deepseek
+    }
+
+    /// Sessions on or after a `YYYY-MM-DD` date.
+    pub fn since(&self, date: &str) -> usize {
+        self.times.iter().filter(|t| date_of(**t).as_str() >= date).count()
     }
 }
 
@@ -265,6 +302,10 @@ impl UsageStats {
                 total.codex += u.codex;
                 total.deepseek += u.deepseek;
                 total.last_used = total.last_used.max(u.last_used);
+                for (k, v) in &u.cwds {
+                    *total.cwds.entry(k.clone()).or_default() += v;
+                }
+                total.times.extend(&u.times);
             }
         }
         total
@@ -300,7 +341,7 @@ pub fn collect(paths: &Paths, days: u64) -> Result<UsageStats> {
         let key = path.to_string_lossy().into_owned();
         match cache.get(&key) {
             Some(e) if e.size == size && e.mtime == mtime && e.agent == agent => {
-                fresh.insert(key, FileEntry { agent, size, mtime, skills: e.skills.clone() });
+                fresh.insert(key, FileEntry { agent, size, mtime, skills: e.skills.clone(), cwd: e.cwd.clone() });
             }
             _ => todo.push((agent, path, size, mtime, key)),
         }
@@ -317,9 +358,10 @@ pub fn collect(paths: &Paths, days: u64) -> Result<UsageStats> {
                 scope.spawn(move || {
                     part.iter()
                         .map(|(agent, path, size, mtime, key)| {
-                            let skills =
-                                read_log(path).map(|b| scan_file(*agent, &b).into_iter().collect()).unwrap_or_default();
-                            (key.clone(), FileEntry { agent: *agent, size: *size, mtime: *mtime, skills })
+                            let (skills, cwd) = read_log(path)
+                                .map(|b| (scan_file(*agent, &b).into_iter().collect(), session_cwd(&b)))
+                                .unwrap_or_default();
+                            (key.clone(), FileEntry { agent: *agent, size: *size, mtime: *mtime, skills, cwd })
                         })
                         .collect::<Vec<_>>()
                 })
@@ -346,6 +388,8 @@ pub fn collect(paths: &Paths, days: u64) -> Result<UsageStats> {
                 Agent::DeepSeek => u.deepseek += 1,
             }
             u.last_used = u.last_used.max(e.mtime);
+            *u.cwds.entry(e.cwd.clone()).or_default() += 1;
+            u.times.push(e.mtime);
         }
     }
     Ok(stats)

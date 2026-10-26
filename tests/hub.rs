@@ -107,21 +107,28 @@ fn hub_is_lazy_scoped_reaps_and_reloads() {
     assert_eq!(init["result"]["capabilities"]["tools"]["listChanged"], json!(true));
     assert!(starts(&home).is_empty(), "initialize must not start backends");
 
-    // First run: no manifest yet, so the hub builds one in the background
-    // and announces the new tools.
+    // Nothing starts on its own: before first use only the two Fusebox
+    // tools are listed, and they reach servers that never ran.
     hub.send(json!({"jsonrpc": "2.0", "method": "notifications/initialized"}));
-    hub.wait("list_changed after warm-up", |m| m["method"] == "notifications/tools/list_changed");
     hub.send(json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}));
-    let list = hub.response(2);
-    let names: Vec<&str> =
-        list["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
-    assert_eq!(names, vec!["fake__echo"]);
+    let names = |v: &Value| -> Vec<String> {
+        v["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap().to_string()).collect()
+    };
+    assert_eq!(names(&hub.response(2)), vec!["fusebox_servers", "fusebox_call"]);
+    hub.send(json!({"jsonrpc": "2.0", "id": 20, "method": "tools/call", "params": {"name": "fusebox_servers", "arguments": {}}}));
+    let listing = hub.response(20)["result"]["content"][0]["text"].as_str().unwrap().to_string();
+    assert!(listing.contains("\"server\":\"fake\"") && listing.contains("\"started\":false"), "{listing}");
+    assert!(starts(&home).is_empty(), "listing servers must not start them");
 
-    // Call: backend runs with its declared secret only.
+    // Call through fusebox_call: starts the backend with only its secret.
     hub.send(json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
-        "params": {"name": "fake__echo", "arguments": {"text": "hi"}}}));
+        "params": {"name": "fusebox_call", "arguments": {"server": "fake", "tool": "echo", "arguments": {"text": "hi"}}}}));
+    // Starting it caches and announces its tools (sent before the result).
+    hub.wait("list_changed after first start", |m| m["method"] == "notifications/tools/list_changed");
     let call = hub.response(3);
     assert_eq!(call["result"]["content"][0]["text"], json!("echo:hi token=tok-1 leaked=[]"));
+    hub.send(json!({"jsonrpc": "2.0", "id": 21, "method": "tools/list"}));
+    assert!(names(&hub.response(21)).contains(&"fake__echo".to_string()));
 
     // Idle reaper stops the backend (idleSeconds = 1, reaper ticks every 5s).
     let pid = *starts(&home).last().unwrap();

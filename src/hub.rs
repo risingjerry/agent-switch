@@ -211,6 +211,9 @@ impl State {
 
     fn list(&self) -> Vec<Value> {
         let mut out = Vec::new();
+        if !self.hub_tools().is_empty() {
+            out.extend(meta_tools());
+        }
         for tool in self.hub_tools() {
             let Some(manifest) = load_manifest(&self.paths, &tool.id) else { continue };
             let prefix = short_id(&tool);
@@ -228,8 +231,12 @@ impl State {
     }
 
     fn instructions(&self) -> String {
-        let mut parts =
-            vec!["Tools named <server>__<tool> are served by Fusebox; each server starts on first use.".to_string()];
+        let mut parts = vec![
+            "On-demand MCP servers managed by Fusebox. Tools named <server>__<tool> start their server on first use. \
+             Servers that never ran have no listed tools yet: call fusebox_servers to see every server (pass `server` \
+             to start one and get its tools), then fusebox_call to use a tool."
+                .to_string(),
+        ];
         for tool in self.hub_tools() {
             if let Some(text) =
                 load_manifest(&self.paths, &tool.id).and_then(|m| m["instructions"].as_str().map(String::from))
@@ -289,44 +296,63 @@ impl State {
         Ok(backend)
     }
 
+    fn find_server(&self, key: &str) -> Result<Tool, String> {
+        self.hub_tools()
+            .into_iter()
+            .find(|t| short_id(t) == key || t.id == key || t.id.trim_start_matches("agent-") == key)
+            .ok_or_else(|| format!("unknown on-demand server: {key}; call fusebox_servers to list them"))
+    }
+
+    /// `fusebox_servers`: every on-demand server; with `server`, start it
+    /// and return its tools (also caching them for the next tools/list).
+    fn servers(&self, args: &Value) -> Result<Value, String> {
+        if let Some(key) = args["server"].as_str().filter(|s| !s.is_empty()) {
+            let tool = self.find_server(key)?;
+            self.backend(&tool)?.touch();
+            let manifest = load_manifest(&self.paths, &tool.id).unwrap_or(Value::Null);
+            let tools = manifest["tools"].clone();
+            let text = json!({"server": short_id(&tool), "name": tool.name, "tools": tools,
+                "usage": "call tools with fusebox_call {server, tool, arguments}"});
+            return Ok(json!({"content": [{"type": "text", "text": text.to_string()}]}));
+        }
+        let list: Vec<Value> = self
+            .hub_tools()
+            .iter()
+            .map(|t| {
+                let tools: Vec<Value> = load_manifest(&self.paths, &t.id)
+                    .and_then(|m| m["tools"].as_array().cloned())
+                    .map(|a| a.iter().map(|x| x["name"].clone()).collect())
+                    .unwrap_or_default();
+                json!({"server": short_id(t), "name": t.name, "description": t.description,
+                    "started": !tools.is_empty(), "tools": tools})
+            })
+            .collect();
+        Ok(json!({"content": [{"type": "text", "text": Value::Array(list).to_string()}]}))
+    }
+
     fn call(&self, params: &Value) -> Result<Value, String> {
         let full = params["name"].as_str().ok_or("tools/call requires a name")?;
-        let (prefix, name) = full.split_once(SEP).ok_or_else(|| format!("unknown tool: {full}"))?;
-        let tool = self
-            .hub_tools()
-            .into_iter()
-            .find(|t| short_id(t) == prefix)
-            .ok_or_else(|| format!("unknown or disabled server: {prefix}"))?;
+        let args = &params["arguments"];
+        let (tool, name, arguments) = match full {
+            "fusebox_servers" => return self.servers(args),
+            "fusebox_call" => {
+                let server = args["server"].as_str().ok_or("fusebox_call needs `server`")?;
+                let name = args["tool"].as_str().ok_or("fusebox_call needs `tool`")?;
+                (self.find_server(server)?, name.to_string(), args["arguments"].clone())
+            }
+            _ => {
+                let (prefix, name) = full.split_once(SEP).ok_or_else(|| format!("unknown tool: {full}"))?;
+                (self.find_server(prefix)?, name.to_string(), args.clone())
+            }
+        };
         let backend = self.backend(&tool)?;
         backend.in_flight.fetch_add(1, Ordering::SeqCst);
         backend.touch();
-        let mut forwarded = params.clone();
-        forwarded["name"] = json!(name);
+        let forwarded = json!({"name": name, "arguments": if arguments.is_null() { json!({}) } else { arguments }});
         let result = backend.request("tools/call", forwarded, None);
         backend.touch();
         backend.in_flight.fetch_sub(1, Ordering::SeqCst);
         result
-    }
-
-    /// Build manifests for hub tools that have never run, one at a time,
-    /// then stop them again.
-    fn warm_missing(self: &Arc<Self>) {
-        let state = Arc::clone(self);
-        std::thread::spawn(move || {
-            for tool in state.hub_tools() {
-                if load_manifest(&state.paths, &tool.id).is_some()
-                    || state.backends.lock().unwrap().contains_key(&tool.id)
-                {
-                    continue;
-                }
-                if let Ok(b) = state.backend(&tool)
-                    && b.in_flight.load(Ordering::SeqCst) == 0
-                {
-                    state.backends.lock().unwrap().remove(&tool.id);
-                    b.stop();
-                }
-            }
-        });
     }
 
     fn reaper(self: &Arc<Self>) {
@@ -377,7 +403,6 @@ impl State {
                 });
                 drop(backends);
                 state.notify_list_changed();
-                state.warm_missing();
             }
         });
     }
@@ -401,6 +426,25 @@ pub fn warm(paths: &Paths, config: &Config, tool: &Tool) -> crate::util::Result<
     let manifest = json!({"tools": tools, "instructions": init["instructions"], "updatedAt": crate::skills::now_iso()});
     save_manifest(paths, &tool.id, &manifest);
     Ok(count)
+}
+
+/// Always listed while any on-demand server exists, so agents can reach
+/// servers that have never been started (and so have no cached tools).
+fn meta_tools() -> Vec<Value> {
+    vec![
+        json!({
+            "name": "fusebox_servers",
+            "description": "List the on-demand MCP servers Fusebox can start for you, with their tools. Pass `server` to start one and get its full tool list (names, descriptions, input schemas).",
+            "inputSchema": {"type": "object", "properties": {"server": {"type": "string", "description": "server to start, e.g. rea"}}},
+        }),
+        json!({
+            "name": "fusebox_call",
+            "description": "Call a tool on an on-demand MCP server (started automatically). Use fusebox_servers first to see the tool names and their input schemas.",
+            "inputSchema": {"type": "object", "required": ["server", "tool"], "properties": {
+                "server": {"type": "string"}, "tool": {"type": "string"},
+                "arguments": {"type": "object", "description": "the tool's arguments"}}},
+        }),
+    ]
 }
 
 pub fn serve(paths: Paths, config_path: PathBuf, app: String) -> crate::util::Result<()> {
@@ -436,7 +480,6 @@ pub fn serve(paths: Paths, config_path: PathBuf, app: String) -> crate::util::Re
         let Some(id) = id else {
             if method == "notifications/initialized" {
                 state.ready.store(true, Ordering::SeqCst);
-                state.warm_missing();
             }
             continue;
         };

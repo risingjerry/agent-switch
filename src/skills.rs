@@ -459,6 +459,9 @@ pub fn enable(hub: &Hub, profile_name: &str, name: &str, source: &str, path: Opt
     items.push(entry);
     items.sort_by_key(entry_name);
     profile.insert("skills".into(), Value::Array(items.into_iter().map(Value::Object).collect()));
+    if let Some(Value::Object(since)) = profile.get_mut("onDemandSince") {
+        since.remove(name);
+    }
     write_json(&file, &Value::Object(profile))
 }
 
@@ -470,8 +473,28 @@ pub fn disable(hub: &Hub, profile_name: &str, name: &str) -> Result<bool> {
     let after: Vec<Value> = before.iter().filter(|i| entry_name(i) != name).cloned().map(Value::Object).collect();
     let removed = after.len() != before.len();
     profile.insert("skills".into(), Value::Array(after));
+    if removed {
+        // Usage before this date happened while the skill was resident.
+        let since = profile.entry("onDemandSince").or_insert_with(|| json!({}));
+        if let Some(map) = since.as_object_mut() {
+            map.insert(name.to_string(), json!(&now_iso()[..10]));
+        }
+    }
     write_json(&file, &Value::Object(profile))?;
     Ok(removed)
+}
+
+/// Latest date any profile recorded `name` as switched to on demand.
+pub fn on_demand_since(hub: &Hub, name: &str) -> Option<String> {
+    hub.profile_names()
+        .iter()
+        .filter_map(|p| hub.profile(p).ok()?.get("onDemandSince")?.get(name)?.as_str().map(String::from))
+        .max()
+}
+
+/// Sync one profile, routing `global` to the official-baseline sync.
+pub fn sync_any(hub: &Hub, profile: &str) -> Result<Vec<String>> {
+    if profile == "global" { sync_global(hub, false, true) } else { sync_profile(hub, profile, false, true) }
 }
 
 // ---- git sources ----
@@ -735,6 +758,140 @@ pub fn profile_keep(hub: &Hub, profile_name: &str) -> BTreeSet<String> {
         .and_then(|p| p.get("keep").and_then(Value::as_array).cloned())
         .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
         .unwrap_or_default()
+}
+
+/// (source, path) of a skill entry in a profile.
+pub fn profile_entry(hub: &Hub, profile_name: &str, name: &str) -> Option<(String, String)> {
+    let profile = hub.profile(profile_name).ok()?;
+    profile_skills(&profile)
+        .iter()
+        .find(|i| entry_name(i) == name)
+        .map(|i| (s(i.get("source")).unwrap_or("").to_string(), entry_path(i)))
+}
+
+/// Project profiles (everything but `global`) with their resolved roots.
+pub fn project_roots(hub: &Hub) -> Vec<(String, PathBuf)> {
+    hub.profile_names()
+        .into_iter()
+        .filter(|n| n != "global")
+        .filter_map(|n| {
+            let p = hub.profile(&n).ok()?;
+            let root = resolve_lenient(&crate::util::expand_user(s(p.get("project"))?));
+            Some((n, root))
+        })
+        .collect()
+}
+
+// ---- on-demand discovery: search / show ----
+
+pub struct CatalogEntry {
+    pub name: String,
+    pub id: String,
+    pub description: String,
+    pub skill_md: PathBuf,
+    pub profiles: Vec<String>,
+}
+
+/// `name` and `description` from SKILL.md frontmatter (folded/literal
+/// multi-line descriptions included).
+pub fn frontmatter(skill_md: &Path) -> (Option<String>, String) {
+    let Ok(text) = fs::read_to_string(skill_md) else { return (None, String::new()) };
+    let Some(body) = text.strip_prefix("---") else { return (None, String::new()) };
+    let front = body.split("\n---").next().unwrap_or("");
+    let (mut name, mut desc, mut in_desc) = (None, String::new(), false);
+    for line in front.lines() {
+        let is_key = line.chars().next().is_some_and(|c| c.is_ascii_alphabetic()) && line.contains(':');
+        if is_key {
+            in_desc = false;
+            let (k, v) = line.split_once(':').unwrap();
+            let v = v.trim().trim_matches(['"', '\'']);
+            match k.trim() {
+                "name" => name = Some(v.to_string()),
+                "description" => {
+                    in_desc = true;
+                    if !matches!(v, ">" | "|" | ">-" | "|-") {
+                        desc.push_str(v);
+                    }
+                }
+                _ => {}
+            }
+        } else if in_desc {
+            if !desc.is_empty() {
+                desc.push(' ');
+            }
+            desc.push_str(line.trim());
+        }
+    }
+    (name, desc)
+}
+
+/// Every skill present on disk in any source, resident or not.
+pub fn catalog(hub_root: &Path) -> Result<Vec<CatalogEntry>> {
+    let report = report(hub_root)?;
+    let mut out = Vec::new();
+    for s in report["skills"].as_array().into_iter().flatten() {
+        if s["exists"] != true {
+            continue;
+        }
+        let dir = PathBuf::from(s["absolutePath"].as_str().unwrap_or(""));
+        let skill_md = dir.join("SKILL.md");
+        let (fm_name, description) = frontmatter(&skill_md);
+        out.push(CatalogEntry {
+            name: s["name"].as_str().map(String::from).or(fm_name).unwrap_or_default(),
+            id: s["id"].as_str().unwrap_or("").to_string(),
+            description,
+            skill_md,
+            profiles: s["profiles"]
+                .as_array()
+                .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .unwrap_or_default(),
+        });
+    }
+    Ok(out)
+}
+
+/// Query terms: lowercase ASCII words plus CJK character bigrams, so Chinese
+/// queries match without a tokenizer.
+fn terms(text: &str) -> Vec<String> {
+    let lower = text.to_lowercase();
+    let mut out: Vec<String> = lower
+        .split(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_'))
+        .filter(|w| w.len() >= 2)
+        .map(String::from)
+        .collect();
+    let cjk: Vec<char> = lower.chars().filter(|c| *c as u32 >= 0x2E80).collect();
+    out.extend(cjk.windows(2).map(|w| w.iter().collect::<String>()));
+    if cjk.len() == 1 {
+        out.push(cjk[0].to_string());
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// Ranked matches for a task description. Name hits weigh more than
+/// description hits.
+pub fn search<'a>(catalog: &'a [CatalogEntry], query: &str, limit: usize) -> Vec<(&'a CatalogEntry, usize)> {
+    let q = terms(query);
+    let mut scored: Vec<(&CatalogEntry, usize)> = catalog
+        .iter()
+        .map(|e| {
+            let name = e.name.to_lowercase();
+            let desc = e.description.to_lowercase();
+            let score = q
+                .iter()
+                .map(|t| if name.contains(t.as_str()) { 3 } else { 0 } + usize::from(desc.contains(t.as_str())))
+                .sum();
+            (e, score)
+        })
+        .filter(|(_, s)| *s > 0)
+        .collect();
+    scored.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.name.cmp(&b.0.name)));
+    // Same skill reachable from two sources: keep the best-ranked one.
+    let mut seen = BTreeSet::new();
+    scored.retain(|(e, _)| seen.insert(e.name.clone()));
+    scored.truncate(limit);
+    scored
 }
 
 #[cfg(test)]
