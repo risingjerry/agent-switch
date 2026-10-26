@@ -911,25 +911,6 @@ pub fn catalog(hub_root: &Path) -> Result<Vec<CatalogEntry>> {
     Ok(out)
 }
 
-/// Query terms: lowercase ASCII words plus CJK character bigrams, so Chinese
-/// queries match without a tokenizer.
-fn terms(text: &str) -> Vec<String> {
-    let lower = text.to_lowercase();
-    let mut out: Vec<String> = lower
-        .split(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_'))
-        .filter(|w| w.len() >= 2)
-        .map(String::from)
-        .collect();
-    let cjk: Vec<char> = lower.chars().filter(|c| *c as u32 >= 0x2E80).collect();
-    out.extend(cjk.windows(2).map(|w| w.iter().collect::<String>()));
-    if cjk.len() == 1 {
-        out.push(cjk[0].to_string());
-    }
-    out.sort();
-    out.dedup();
-    out
-}
-
 /// BM25 over two fields (name weighted 3x, description/text 1x) for one
 /// catalog of Skills and MCP servers. Tokens: ASCII words split on
 /// separators, plus CJK character bigrams.
@@ -1004,31 +985,6 @@ impl Bm25 {
             })
             .sum()
     }
-}
-
-/// Ranked matches for a task description. Name hits weigh more than
-/// description hits.
-pub fn search<'a>(catalog: &'a [CatalogEntry], query: &str, limit: usize) -> Vec<(&'a CatalogEntry, usize)> {
-    let q = terms(query);
-    let mut scored: Vec<(&CatalogEntry, usize)> = catalog
-        .iter()
-        .map(|e| {
-            let name = e.name.to_lowercase();
-            let desc = e.description.to_lowercase();
-            let score = q
-                .iter()
-                .map(|t| if name.contains(t.as_str()) { 3 } else { 0 } + usize::from(desc.contains(t.as_str())))
-                .sum();
-            (e, score)
-        })
-        .filter(|(_, s)| *s > 0)
-        .collect();
-    scored.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.name.cmp(&b.0.name)));
-    // Same skill reachable from two sources: keep the best-ranked one.
-    let mut seen = BTreeSet::new();
-    scored.retain(|(e, _)| seen.insert(e.name.clone()));
-    scored.truncate(limit);
-    scored
 }
 
 #[cfg(test)]

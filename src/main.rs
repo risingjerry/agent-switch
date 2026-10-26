@@ -765,9 +765,22 @@ fn cmd_skills(ctx: &Ctx, a: &Args) -> Result<i32> {
             if query.trim().is_empty() {
                 return Err("usage: fusebox skills search WORDS".into());
             }
-            let catalog = skills::catalog(&ctx.hub_root())?;
+            let hub_root = ctx.hub_root();
+            let catalog = skills::catalog(&hub_root)?;
             let limit = a.one("limit").and_then(|v| v.parse().ok()).unwrap_or(8);
-            let hits = skills::search(&catalog, &query, limit);
+            // Same ranking as `find`, Skills only.
+            let finder = find::Finder::load(&ctx.paths, &hub_root, &ctx.config_path, &ctx.config()?);
+            let cwd = std::env::current_dir().unwrap_or_default();
+            let hits: Vec<(&skills::CatalogEntry, f64)> = finder
+                .hits(&query, Some(&find::project_root(&cwd)), limit + 20)
+                .into_iter()
+                .filter(|h| h["kind"] == "skill")
+                .filter_map(|h| {
+                    let e = catalog.iter().find(|e| h["name"].as_str() == Some(e.name.as_str()))?;
+                    Some((e, h["score"].as_f64().unwrap_or(0.0)))
+                })
+                .take(limit)
+                .collect();
             if json {
                 let rows: Vec<Value> = hits
                     .iter()
