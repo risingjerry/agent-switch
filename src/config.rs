@@ -166,6 +166,9 @@ impl Tool {
         let mut value = self.to_public();
         let map = value.as_object_mut().unwrap();
         map.remove("envNames");
+        if self.mode == Mode::Direct {
+            map.remove("mode");
+        }
         map.insert("env".into(), json!(self.env));
         value
     }
@@ -173,9 +176,7 @@ impl Tool {
     /// Optional fields are only written when set, so configs that never use
     /// them stay byte-identical with the Python implementation.
     fn extend_optional(&self, map: &mut Map<String, Value>) {
-        if self.mode == Mode::Hub {
-            map.insert("mode".into(), json!("hub"));
-        }
+        map.insert("mode".into(), json!(if self.mode == Mode::Hub { "hub" } else { "direct" }));
         if let Some(idle) = self.idle_seconds {
             map.insert("idleSeconds".into(), json!(idle));
         }

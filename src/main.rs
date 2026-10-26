@@ -339,7 +339,15 @@ fn cmd_mcp(ctx: &Ctx, a: &Args) -> Result<i32> {
             a.check(&["json"])?;
             let config = ctx.config()?;
             if json {
-                let tools: Vec<Value> = config.tools.iter().map(Tool::to_public).collect();
+                let tools: Vec<Value> = config
+                    .tools
+                    .iter()
+                    .map(|t| {
+                        let mut v = t.to_public();
+                        v["toolCount"] = json!(hub::cached_tool_count(&ctx.paths, &t.id));
+                        v
+                    })
+                    .collect();
                 print(&(json_pretty(&json!({"mcps": tools})) + "\n"));
             } else {
                 for t in &config.tools {

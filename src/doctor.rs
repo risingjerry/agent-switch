@@ -194,6 +194,11 @@ fn is_executable(path: &Path) -> bool {
 }
 
 type Renderer = fn(&str, &Desired, &Paths) -> Result<String>;
+
+/// Semantic comparison for JSON targets; text targets compare rendered bytes.
+fn in_sync(app: &str, current: &str, desired: &Desired) -> bool {
+    matches!(app, "claude" | "claude_desktop") && render::json_in_sync(current, desired)
+}
 type Target = (&'static str, fn(&Paths) -> &Path, Renderer);
 
 fn targets() -> [Target; 4] {
@@ -265,7 +270,11 @@ pub fn run(config: &Config, paths: &Paths) -> Result<Report> {
         }
         let path = path_of(paths);
         let current = read_text(path)?;
-        match renderer(&current, &desired_for_app(config, app, paths), paths) {
+        let desired = desired_for_app(config, app, paths);
+        if in_sync(app, &current, &desired) {
+            continue;
+        }
+        match renderer(&current, &desired, paths) {
             Err(e) => findings.push(Finding { severity: "error", target: app.into(), message: e }),
             Ok(rendered) if rendered != current => changes.push(Change {
                 target: app.into(),
@@ -340,7 +349,13 @@ pub fn apply(config: &Config, paths: &Paths) -> Result<(ApplySummary, Report)> {
             continue;
         }
         let path = path_of(paths);
-        let rendered = renderer(&read_text(path)?, &desired_for_app(config, app, paths), paths)?;
+        let current = read_text(path)?;
+        let desired = desired_for_app(config, app, paths);
+        if in_sync(app, &current, &desired) {
+            count(false);
+            continue;
+        }
+        let rendered = renderer(&current, &desired, paths)?;
         count(write_if_changed(path, &rendered, None, Some(&paths.backup_dir))?.changed);
     }
     let post = run(config, paths)?;

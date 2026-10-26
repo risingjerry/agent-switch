@@ -86,6 +86,7 @@ const CLI_TARGETS: [(&str, &str, &str); 15] = [
 fn version_of(path: &str) -> Option<String> {
     let mut child = Command::new(path)
         .arg("--version")
+        .env("PATH", augmented_path())
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -113,13 +114,38 @@ fn version_of(path: &str) -> Option<String> {
     Some(line.chars().take(240).collect())
 }
 
+/// PATH first, then the usual per-user install dirs: apps launched from the
+/// Dock get a minimal PATH that misses npm/bun/cargo installs.
+fn extra_dirs() -> Vec<std::path::PathBuf> {
+    let home = crate::util::home_dir();
+    [".local/bin", ".npm-global/bin", ".bun/bin", ".cargo/bin", "Library/pnpm", ".volta/bin"]
+        .iter()
+        .map(|d| home.join(d))
+        .chain(["/opt/homebrew/bin", "/usr/local/bin"].iter().map(std::path::PathBuf::from))
+        .collect()
+}
+
+fn find_cli(command: &str) -> Option<std::path::PathBuf> {
+    which(command).or_else(|| {
+        extra_dirs().into_iter().map(|d| d.join(command)).find(|p| std::fs::metadata(p).is_ok_and(|m| m.is_file()))
+    })
+}
+
+/// PATH plus the extra dirs, so `#!/usr/bin/env node` tools can start.
+fn augmented_path() -> std::ffi::OsString {
+    let mut dirs: Vec<std::path::PathBuf> =
+        std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
+    dirs.extend(extra_dirs());
+    std::env::join_paths(dirs).unwrap_or_default()
+}
+
 pub fn clis() -> Vec<Value> {
     std::thread::scope(|scope| {
         let handles: Vec<_> = CLI_TARGETS
             .iter()
             .map(|&(id, name, manager)| {
                 scope.spawn(move || {
-                    let path = which(id).map(|p| p.to_string_lossy().into_owned());
+                    let path = find_cli(id).map(|p| p.to_string_lossy().into_owned());
                     let version = path.as_deref().and_then(version_of);
                     json!({
                         "id": id, "name": name, "command": id, "manager": manager,

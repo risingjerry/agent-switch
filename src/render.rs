@@ -27,6 +27,22 @@ impl Spec {
 
 // ---- Claude Code / Claude Desktop (JSON) ----
 
+/// True when the `agent-*` servers in a JSON config already equal `desired`.
+/// Claude Code rewrites `~/.claude.json` constantly with its own key order and
+/// number formatting, so a byte comparison would report drift forever and
+/// make reconcile rewrite a file another process owns.
+pub fn json_in_sync(current: &str, desired: &Desired) -> bool {
+    let Ok(Value::Object(root)) = serde_json::from_str::<Value>(current) else { return false };
+    let empty = Map::new();
+    let servers = match root.get("mcpServers") {
+        Some(Value::Object(m)) => m,
+        None | Some(Value::Null) => &empty,
+        Some(_) => return false,
+    };
+    let ours: Vec<(&String, &Value)> = servers.iter().filter(|(k, _)| k.starts_with(AGENT_PREFIX)).collect();
+    ours.len() == desired.len() && ours.iter().all(|(k, v)| desired.get(*k).is_some_and(|s| **v == s.to_value()))
+}
+
 pub fn json_config(current: &str, desired: &Desired) -> Result<String> {
     let mut root = if current.trim().is_empty() {
         Map::new()
@@ -276,6 +292,19 @@ mod tests {
         let out = json_config(current, &desired()).unwrap();
         let expected = "{\n  \"a\": [\n    1.5\n  ],\n  \"mcpServers\": {\n    \"agent-a\": {\n      \"args\": [\n        \"x\",\n        \"é\"\n      ],\n      \"command\": \"/bin/mcp-a\"\n    },\n    \"agent-b\": {\n      \"args\": [],\n      \"command\": \"/bin/mcp-b\"\n    },\n    \"mine\": {\n      \"command\": \"m\"\n    }\n  },\n  \"z\": 1\n}\n";
         assert_eq!(out, expected);
+    }
+
+    #[test]
+    fn json_sync_ignores_foreign_formatting() {
+        let d = desired();
+        let rendered = json_config(r#"{"b": 1, "a": 2.50}"#, &d).unwrap();
+        let reformatted = rendered.replace("\n", "").replace("  ", "");
+        assert!(json_in_sync(&reformatted, &d));
+        let mut changed = d.clone();
+        changed.get_mut("agent-a").unwrap().args.push("y".into());
+        assert!(!json_in_sync(&rendered, &changed));
+        assert!(!json_in_sync(r#"{"mcpServers": {"agent-x": {}}}"#, &Desired::new()));
+        assert!(json_in_sync(r#"{"mcpServers": {"mine": {}}}"#, &Desired::new()));
     }
 
     #[test]

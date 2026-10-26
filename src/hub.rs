@@ -384,6 +384,12 @@ impl State {
     }
 }
 
+/// Number of tools in the cached manifest, if the tool has ever run under
+/// the hub or been warmed.
+pub fn cached_tool_count(paths: &Paths, id: &str) -> Option<usize> {
+    load_manifest(paths, id).and_then(|m| m["tools"].as_array().map(Vec::len))
+}
+
 /// Start `tool` once, record its tool manifest and stop it. Returns the
 /// number of tools. Used when a tool is switched to hub mode so the very
 /// next session already lists its tools.

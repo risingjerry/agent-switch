@@ -1,168 +1,150 @@
-// [INPUT]: SwiftUI, AppState, DSComponents, DSTokens, L10n
-// [OUTPUT]: DashboardView — main status overview
-// [POS]: Features/Dashboard — shows runtime state, drift, findings summary
+// [INPUT]: SwiftUI, AppState, DS components, AgentsStrip
+// [OUTPUT]: DashboardView — the Overview page
+// [POS]: Features/Dashboard — first page; links into the other pages
 // [PROTOCOL]: When this file changes, update this header, then check CLAUDE.md
 
 import SwiftUI
 
 struct DashboardView: View {
-    @EnvironmentObject var appState: AppState
+    @Environment(AppState.self) private var state
+    @Binding var page: Page
 
     var body: some View {
-        DSPage(title: L10n.appName, subtitle: pageSubtitle, badges: pageBadges) {
-            if let error = appState.lastError {
-                errorSection(error)
-            }
-
-            metricsGrid
-
-            if let report = appState.report {
-                routesSection()
-                findingsSection(report)
-                changesSection(report)
-            }
-        }
-    }
-
-    private func errorSection(_ message: String) -> some View {
-        DSCard {
-            VStack(alignment: .leading, spacing: DSSpacing.sm) {
-                DSBadge(text: L10n.loadFailed, tone: .bad)
-                Text(message)
-                    .font(DSTypography.body)
-                    .foregroundStyle(DSColor.textSecondary)
-                    .textSelection(.enabled)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    private var pageSubtitle: String? {
-        appState.lastRefresh.map { "\(L10n.lastRefreshed)\($0.formatted(date: .omitted, time: .shortened))" }
-    }
-
-    private var pageBadges: [DSPageBadge] {
-        guard let report = appState.report else { return [] }
-        return [
-            DSPageBadge(text: report.blocked ? L10n.blocked : L10n.ready, tone: report.blocked ? .bad : .good),
-            DSPageBadge(text: "\(report.driftCount) \(L10n.drift)", tone: report.driftCount == 0 ? .good : .warn),
-        ]
-    }
-
-    private var metricsGrid: some View {
-        let report = appState.report
-        return LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: DSSpacing.md), count: 4), spacing: DSSpacing.md) {
-            DSMetricCard(
-                label: L10n.runtimeState,
-                value: report.map { $0.blocked ? L10n.blocked : L10n.ready } ?? "—",
-                note: report.map { $0.driftCount == 0 ? L10n.noDriftDetected : L10n.reviewPlannedChanges } ?? L10n.loadingTools
-            )
-            DSMetricCard(
-                label: L10n.driftChanges,
-                value: report.map { "\($0.driftCount)" } ?? "—",
-                note: report.map { $0.driftCount == 0 ? L10n.allTargetsInSync : L10n.runReconcileToFix } ?? ""
-            )
-            DSMetricCard(
-                label: L10n.findingsLabel,
-                value: report.map { "\($0.findings.count)" } ?? "—",
-                note: report.map { $0.findings.isEmpty ? L10n.noIssuesFound : "\($0.findings.filter { $0.severity == "error" }.count) \(L10n.errors)" } ?? ""
-            )
-            DSMetricCard(
-                label: L10n.secretsLabel,
-                value: report.map { "\($0.secrets.presentNames.count)/\($0.secrets.required.count)" } ?? "—",
-                note: report.map { $0.secrets.missing.isEmpty ? L10n.allPresent : "\($0.secrets.missing.count) \(L10n.missing)" } ?? ""
-            )
-        }
-    }
-
-    @ViewBuilder
-    private func routesSection() -> some View {
-        let routes = appState.config?.routes
-        DSCard {
-            VStack(alignment: .leading, spacing: DSSpacing.md) {
-                Text(L10n.accessRoutes)
-                    .font(DSTypography.heading)
-
-                HStack(spacing: DSSpacing.xl) {
-                    routeItem(role: L10n.searchDefault, toolId: routes?.searchDefault ?? "—")
-                    routeItem(role: L10n.xReader, toolId: routes?.xReadDefault ?? "—")
-                    routeItem(role: L10n.xFallback, toolId: routes?.xReadFallback ?? "—")
+        ScrollView {
+            VStack(alignment: .leading, spacing: DS.page) {
+                hero
+                tiles
+                AgentsStrip(agents: state.agents)
+                if let doctor = state.doctor, !doctor.findings.isEmpty {
+                    findings(doctor.findings)
+                }
+                if let doctor = state.doctor, !doctor.changes.isEmpty {
+                    changes(doctor.changes)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(DS.page)
+            .frame(maxWidth: 1000, alignment: .leading)
+        }
+        .navigationTitle(L10n.overview)
+        .task { if state.usage == nil { await state.loadUsage() } }
+    }
+
+    private var hero: some View {
+        HStack(spacing: DS.pad) {
+            Image(systemName: heroSymbol)
+                .font(.system(size: 34, weight: .medium))
+                .foregroundStyle(heroColor)
+                .symbolEffect(.pulse, isActive: state.syncing)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(heroTitle).font(.title.weight(.semibold))
+                Text(L10n.t("Secrets, MCP servers and Skills for Claude Code, Codex and Hermes — managed in one place.",
+                            "Claude Code、Codex、Hermes 的密钥、MCP 和 Skill，统一在这里管理。"))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            if state.needsSync {
+                Button {
+                    Task { await state.sync() }
+                } label: {
+                    Label(L10n.sync, systemImage: "arrow.triangle.2.circlepath")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(state.syncing)
+            }
         }
     }
 
-    private func routeItem(role: String, toolId: String) -> some View {
-        VStack(alignment: .leading, spacing: DSSpacing.xs) {
-            DSBadge(text: role, tone: .route)
-            Text(toolId)
-                .font(DSTypography.mono)
-                .foregroundStyle(DSColor.textPrimary)
+    private var heroTitle: String {
+        guard let doctor = state.doctor else { return L10n.checking }
+        if doctor.blocked { return L10n.blocked }
+        return state.needsSync ? L10n.pending(state.pendingCount) : L10n.allGood
+    }
+
+    private var heroSymbol: String {
+        guard let doctor = state.doctor else { return "circle.dotted" }
+        if doctor.blocked { return "exclamationmark.octagon.fill" }
+        return state.needsSync ? "arrow.triangle.2.circlepath.circle.fill" : "checkmark.seal.fill"
+    }
+
+    private var heroColor: Color {
+        guard let doctor = state.doctor else { return DS.quiet }
+        if doctor.blocked { return DS.bad }
+        return state.needsSync ? DS.warn : DS.good
+    }
+
+    private var tiles: some View {
+        let enabled = state.mcps.filter(\.enabled)
+        let hub = enabled.filter { $0.mode == "hub" }.count
+        let usage = state.usage
+        let unusedSkills = usage?.enabled.filter { $0.total == 0 }.count
+        let missing = state.missingSecrets.count
+        return LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), spacing: DS.pad)], spacing: DS.pad) {
+            tile(.mcp) {
+                StatTile(symbol: Page.mcp.symbol, title: L10n.mcp, value: "\(enabled.count)",
+                         detail: L10n.t("\(hub) on demand · \(state.mcps.count - enabled.count) off",
+                                        "\(hub) 个按需 · \(state.mcps.count - enabled.count) 个关闭"))
+            }
+            tile(.skills) {
+                StatTile(symbol: Page.skills.symbol, title: L10n.skills, value: "\(usage?.enabled.count ?? 0)",
+                         detail: unusedSkills.map {
+                             L10n.t("\($0) unused in \(state.usageDays) days", "\($0) 个 \(state.usageDays) 天没用过")
+                         } ?? L10n.checking,
+                         tint: (unusedSkills ?? 0) > 0 ? DS.warn : .accentColor)
+            }
+            tile(.secrets) {
+                StatTile(symbol: Page.secrets.symbol, title: L10n.secrets, value: "\(state.secretNames.count)",
+                         detail: missing > 0 ? L10n.t("\(missing) missing", "缺 \(missing) 个")
+                                             : L10n.t("Nothing missing", "没有缺失"),
+                         tint: missing > 0 ? DS.bad : .accentColor)
+            }
+            tile(.overview) {
+                let synced = state.agents.filter(\.inSync).count
+                let detected = state.agents.filter(\.detected).count
+                StatTile(symbol: "person.2.wave.2", title: L10n.agents, value: "\(synced)/\(detected)",
+                         detail: L10n.t("agents in sync", "个 Agent 已同步"),
+                         tint: synced == detected ? DS.good : DS.warn)
+            }
         }
     }
 
-    @ViewBuilder
-    private func findingsSection(_ report: DoctorReport) -> some View {
-        DSCard {
-            VStack(alignment: .leading, spacing: DSSpacing.md) {
-                Text(L10n.findings)
-                    .font(DSTypography.heading)
+    private func tile(_ target: Page, @ViewBuilder _ content: () -> some View) -> some View {
+        Button { page = target } label: { content() }
+            .buttonStyle(.plain)
+    }
 
-                if report.findings.isEmpty {
-                    Text(L10n.noFindingsHealthy)
-                        .font(DSTypography.body)
-                        .foregroundStyle(DSColor.textSecondary)
-                        .padding(.vertical, DSSpacing.sm)
-                } else {
-                    ForEach(report.findings) { finding in
-                        HStack(spacing: DSSpacing.sm) {
-                            DSBadge(
-                                text: finding.severity,
-                                tone: finding.severity == "error" ? .bad : .warn
-                            )
-                            Text(finding.target)
-                                .font(.system(size: 13, weight: .semibold))
-                            Text(finding.message)
-                                .font(DSTypography.body)
-                                .foregroundStyle(DSColor.textSecondary)
-                                .lineLimit(1)
+    private func findings(_ items: [Finding]) -> some View {
+        VStack(alignment: .leading, spacing: DS.gap) {
+            Text(L10n.findings).font(.headline)
+            Card {
+                ForEach(items) { f in
+                    HStack(alignment: .firstTextBaseline, spacing: DS.gap) {
+                        Image(systemName: f.severity == "error" ? "xmark.octagon.fill" : "exclamationmark.triangle.fill")
+                            .foregroundStyle(f.severity == "error" ? DS.bad : DS.warn)
+                        Text(f.target).font(.callout.weight(.medium))
+                        Text(f.message).font(.callout).foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+    }
+
+    private func changes(_ items: [PlannedChange]) -> some View {
+        VStack(alignment: .leading, spacing: DS.gap) {
+            Text(L10n.pendingChanges).font(.headline)
+            Card {
+                ForEach(items) { c in
+                    HStack(spacing: DS.gap) {
+                        Chip(text: c.action, tint: c.action == "delete" ? DS.bad : .accentColor)
+                        Text(c.detail).font(.callout)
+                        Spacer()
+                        if let path = c.path {
+                            Text((path as NSString).abbreviatingWithTildeInPath)
+                                .font(.caption).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.middle)
                         }
                     }
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    @ViewBuilder
-    private func changesSection(_ report: DoctorReport) -> some View {
-        DSCard {
-            VStack(alignment: .leading, spacing: DSSpacing.md) {
-                Text(L10n.plannedChanges)
-                    .font(DSTypography.heading)
-
-                if report.changes.isEmpty {
-                    Text(L10n.noPlannedChanges)
-                        .font(DSTypography.body)
-                        .foregroundStyle(DSColor.textSecondary)
-                        .padding(.vertical, DSSpacing.sm)
-                } else {
-                    ForEach(report.changes) { change in
-                        HStack(spacing: DSSpacing.sm) {
-                            DSBadge(text: change.action, tone: .info)
-                            Text(change.target)
-                                .font(.system(size: 13, weight: .semibold))
-                            Text(change.detail)
-                                .font(DSTypography.body)
-                                .foregroundStyle(DSColor.textSecondary)
-                                .lineLimit(1)
-                            Spacer()
-                        }
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }

@@ -1,427 +1,258 @@
-// [INPUT]: SwiftUI, AppState, DSComponents, DSTokens, L10n
-// [OUTPUT]: ToolsView — lists managed MCP tools with status
-// [POS]: Features/Tools — shows tool list, wrapper health, target apps
+// [INPUT]: SwiftUI, AppState, MCPServer, MCPDraft, DS components
+// [OUTPUT]: ToolsView — MCP list with per-row mode switch, editor inspector, import sheet
+// [POS]: Features/Tools — the MCP page
 // [PROTOCOL]: When this file changes, update this header, then check CLAUDE.md
 
 import SwiftUI
 
 struct ToolsView: View {
-    @EnvironmentObject var appState: AppState
-    @State private var showingEditor = false
-    @State private var editingToolID: String?
-    @State private var pendingDelete: String?
-    @State private var showingImportConfirmation = false
+    @Environment(AppState.self) private var state
+    @State private var selection: MCPServer.ID?
+    @State private var draft: MCPDraft?
+    @State private var showImport = false
+    @State private var query = ""
 
-    private var tools: [ToolDisplayItem] {
-        guard let report = appState.report, let config = appState.config else { return [] }
-        return config.tools.map { tool in
-            let hasAllSecrets = tool.requiredSecrets.allSatisfy { report.secrets.presentNames.contains($0) }
-            let missingSecrets = tool.requiredSecrets.filter { report.secrets.missing.contains($0) }
-            return ToolDisplayItem(
-                id: tool.id,
-                name: tool.name,
-                command: tool.displayCommand,
-                description: tool.description,
-                apps: tool.apps.enabledApps,
-                requiredSecrets: tool.requiredSecrets,
-                missingSecrets: missingSecrets,
-                secretsOk: hasAllSecrets,
-                hasDrift: report.changes.contains { $0.target == "wrappers" && $0.detail.contains(tool.id) },
-                enabled: tool.enabled
-            )
-        }
-    }
-
-    private var editingTool: ToolInfo? {
-        appState.config?.tools.first { $0.id == editingToolID }
+    private var rows: [MCPServer] {
+        let all = state.mcps.sorted { ($0.enabled ? 0 : 1, $0.shortName) < ($1.enabled ? 0 : 1, $1.shortName) }
+        guard !query.isEmpty else { return all }
+        return all.filter { $0.shortName.localizedCaseInsensitiveContains(query) || $0.command.localizedCaseInsensitiveContains(query) }
     }
 
     var body: some View {
-        DSPage(title: L10n.managedMCPTools, subtitle: pageSubtitle, badges: pageBadges) {
-            if tools.isEmpty && appState.isLoading {
-                ProgressView(L10n.loadingTools)
-                    .padding(.top, DSSpacing.xxl)
+        Group {
+            if state.mcps.isEmpty && !state.busy {
+                ContentUnavailableView {
+                    Label(L10n.noMCP, systemImage: Page.mcp.symbol)
+                } actions: {
+                    Button(L10n.newMCP) { draft = .new() }
+                    Button(L10n.importMCPs) { showImport = true }
+                }
             } else {
-                toolSummary
-
-                LazyVStack(spacing: DSSpacing.lg) {
-                    ForEach(tools) { tool in
-                        ToolRow(
-                            tool: tool,
-                            onEdit: {
-                                editingToolID = tool.id
-                                showingEditor = true
-                            },
-                            onToggle: {
-                                Task { _ = await appState.setMCPEnabled(id: tool.id, enabled: !tool.enabled) }
-                            },
-                            onDelete: { pendingDelete = tool.id }
-                        )
+                List(selection: $selection) {
+                    Section {
+                        ForEach(rows) { server in
+                            MCPRow(server: server, missing: Set(state.missingSecrets))
+                                .tag(server.id)
+                        }
+                    } footer: {
+                        Text(L10n.modeHelp).font(.callout).foregroundStyle(.secondary).padding(.top, DS.gap)
                     }
                 }
+                .listStyle(.inset)
+                .searchable(text: $query, placement: .toolbar, prompt: L10n.search)
             }
         }
+        .navigationTitle(L10n.mcp)
         .toolbar {
             ToolbarItemGroup {
-                Button {
-                    Task {
-                        if await appState.previewMCPImport() {
-                            showingImportConfirmation = true
-                        }
-                    }
-                } label: {
-                    Label(L10n.importMCPs, systemImage: "square.and.arrow.down")
+                Button { showImport = true } label: { Label(L10n.importMCPs, systemImage: "square.and.arrow.down") }
+                    .help(L10n.importMCPs)
+                Button { selection = nil; draft = .new() } label: { Label(L10n.newMCP, systemImage: "plus") }
+                    .help(L10n.newMCP)
+            }
+        }
+        .onChange(of: selection) { _, id in
+            guard let id, let server = state.mcps.first(where: { $0.id == id }) else { return }
+            Task { draft = MCPDraft(server, env: await state.service.envValues(id: server.id)) }
+        }
+        .inspector(isPresented: Binding(get: { draft != nil }, set: { if !$0 { draft = nil; selection = nil } })) {
+            if let binding = Binding($draft) {
+                MCPEditor(draft: binding, isNew: selection == nil) {
+                    draft = nil
+                    selection = nil
                 }
-                .disabled(appState.isLoading)
-
-                Button {
-                    editingToolID = nil
-                    showingEditor = true
-                } label: {
-                    Label(L10n.addMCP, systemImage: "plus")
-                }
+                .inspectorColumnWidth(min: 340, ideal: 380, max: 520)
             }
         }
-        .sheet(isPresented: $showingEditor) {
-            MCPEditorSheet(existing: editingTool) { draft in
-                await appState.saveMCP(
-                    id: draft.id,
-                    name: draft.name,
-                    command: draft.command,
-                    args: draft.args,
-                    secrets: draft.secrets,
-                    env: draft.env,
-                    apps: draft.apps,
-                    description: draft.description,
-                    enabled: draft.enabled
-                )
-            }
-        }
-        .confirmationDialog(
-            L10n.removeMCP,
-            isPresented: Binding(
-                get: { pendingDelete != nil },
-                set: { if !$0 { pendingDelete = nil } }
-            ),
-            presenting: pendingDelete
-        ) { id in
-            Button(L10n.removeMCP, role: .destructive) {
-                Task {
-                    _ = await appState.removeMCP(id: id)
-                    pendingDelete = nil
-                }
-            }
-            Button(L10n.cancel, role: .cancel) { pendingDelete = nil }
-        } message: { id in
-            Text("\(L10n.removeMCPConfirmation) \(id)")
-        }
-        .confirmationDialog(
-            L10n.importMCPs,
-            isPresented: $showingImportConfirmation
-        ) {
-            Button(L10n.importAndAdoptMCPs) {
-                Task { _ = await appState.importMCPs() }
-            }
-            Button(L10n.cancel, role: .cancel) {}
-        } message: {
-            Text(importPreviewMessage)
-        }
-    }
-
-    private var importPreviewMessage: String {
-        guard let preview = appState.importPreview else { return L10n.importMCPConfirmation }
-        let ids = Array(Set(preview.imported + preview.merged)).sorted()
-        let idText = ids.isEmpty ? L10n.none : ids.joined(separator: ", ")
-        let secretText = preview.secretNames.isEmpty ? L10n.none : preview.secretNames.joined(separator: ", ")
-        let skippedText = preview.skipped.isEmpty
-            ? L10n.none
-            : preview.skipped.map { "\($0.app):\($0.id)" }.joined(separator: ", ")
-        return "\(L10n.importMCPConfirmation)\n\n\(L10n.discoveredMCPs): \(preview.discovered)\n\(L10n.supportedMCPs): \(preview.supported)\nMCP IDs: \(idText)\n\(L10n.secretNamesOnly): \(secretText)\n\(L10n.skippedMCPs): \(skippedText)"
-    }
-
-    private var pageSubtitle: String? {
-        appState.lastRefresh.map { "\(L10n.lastRefreshed)\($0.formatted(date: .omitted, time: .shortened))" }
-    }
-
-    private var pageBadges: [DSPageBadge] {
-        guard let report = appState.report else { return [] }
-        return [
-            DSPageBadge(text: report.blocked ? L10n.blocked : L10n.ready, tone: report.blocked ? .bad : .good),
-            DSPageBadge(text: "\(report.driftCount) \(L10n.drift)", tone: report.driftCount == 0 ? .good : .warn),
-        ]
-    }
-
-    private var toolSummary: some View {
-        let readyCount = tools.filter(\.secretsOk).count
-        let missingCount = tools.reduce(0) { $0 + $1.missingSecrets.count }
-        let driftCount = tools.filter(\.hasDrift).count
-
-        return LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: DSSpacing.md), count: 4), spacing: DSSpacing.md) {
-            DSMetricCard(
-                label: L10n.mcpTools,
-                value: "\(tools.count)",
-                note: L10n.allTargetsInSync
-            )
-            DSMetricCard(
-                label: L10n.readyState,
-                value: "\(readyCount)",
-                note: readyCount == tools.count ? L10n.allSecretsConfigured : L10n.reviewPlannedChanges
-            )
-            DSMetricCard(
-                label: L10n.missing,
-                value: "\(missingCount)",
-                note: missingCount == 0 ? L10n.allPresent : L10n.missingSecrets
-            )
-            DSMetricCard(
-                label: L10n.driftChanges,
-                value: "\(driftCount)",
-                note: driftCount == 0 ? L10n.noDriftDetected : L10n.runReconcileToFix
-            )
-        }
+        .sheet(isPresented: $showImport) { ImportSheet() }
     }
 }
 
-struct ToolDisplayItem: Identifiable {
-    let id: String
-    let name: String
-    let command: String
-    let description: String?
-    let apps: [String]
-    let requiredSecrets: [String]
-    let missingSecrets: [String]
-    let secretsOk: Bool
-    let hasDrift: Bool
-    let enabled: Bool
-}
-
-struct ToolRow: View {
-    let tool: ToolDisplayItem
-    let onEdit: () -> Void
-    let onToggle: () -> Void
-    let onDelete: () -> Void
+private struct MCPRow: View {
+    @Environment(AppState.self) private var state
+    let server: MCPServer
+    let missing: Set<String>
 
     var body: some View {
-        DSCard {
-            VStack(alignment: .leading, spacing: DSSpacing.lg) {
+        HStack(spacing: DS.pad) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(server.name).font(.body.weight(.medium))
+                    if let n = server.toolCount {
+                        Chip(text: "\(n) \(L10n.tools)")
+                    }
+                    let lacking = server.requiredSecrets.filter { missing.contains($0) }
+                    if !lacking.isEmpty {
+                        Chip(text: "\(L10n.missing): \(lacking.joined(separator: ", "))", tint: DS.bad)
+                    }
+                }
+                Text(([server.command] + server.args).joined(separator: " "))
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                HStack(spacing: 4) {
+                    ForEach(server.apps.names, id: \.self) { Chip(text: AppNames.short($0)) }
+                }
+            }
+            Spacer(minLength: DS.pad)
+            Picker("", selection: Binding(get: { server.effectiveMode }, set: { mode in
+                Task { await state.setMode(server, mode) }
+            })) {
+                Text(L10n.modeOff).tag(MCPMode.off)
+                Text(L10n.modeDirect).tag(MCPMode.direct)
+                Text(L10n.modeHub).tag(MCPMode.hub)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            .disabled(state.syncing)
+        }
+        .padding(.vertical, 4)
+        .opacity(server.enabled ? 1 : 0.6)
+    }
+}
+
+private struct MCPEditor: View {
+    @Environment(AppState.self) private var state
+    @Binding var draft: MCPDraft
+    let isNew: Bool
+    let close: () -> Void
+    @State private var confirmDelete = false
+
+    var body: some View {
+        Form {
+            Section {
+                if isNew {
+                    TextField("ID", text: $draft.id, prompt: Text("my-server"))
+                }
+                TextField(L10n.t("Name", "名称"), text: $draft.name)
+                TextField(L10n.description, text: $draft.description, axis: .vertical)
+            }
+            Section(L10n.command) {
+                TextField(L10n.command, text: $draft.command, prompt: Text("npx"))
+                    .font(DS.mono)
+                TextField(L10n.arguments, text: lines($draft.args), prompt: Text(L10n.oneArgPerLine), axis: .vertical)
+                    .font(DS.mono)
+                    .lineLimit(2...8)
+            }
+            Section(L10n.requiredSecrets) {
+                TextField(L10n.requiredSecrets, text: lines($draft.secrets), prompt: Text("OPENAI_API_KEY"), axis: .vertical)
+                    .font(DS.mono)
+                    .lineLimit(1...5)
+                Text(L10n.t("Use ${NAME} in arguments to pass a secret on the command line.",
+                            "需要放进参数时，写成 ${NAME}。"))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section(L10n.environment) {
+                TextField(L10n.environment, text: envText, prompt: Text("NAME=value"), axis: .vertical)
+                    .font(DS.mono)
+                    .lineLimit(1...6)
+            }
+            Section(L10n.apps) {
+                Toggle("Claude Code", isOn: $draft.apps.claude)
+                Toggle("Claude Desktop", isOn: $draft.apps.claude_desktop)
+                Toggle("Codex", isOn: $draft.apps.codex)
+                Toggle("Hermes", isOn: $draft.apps.hermes)
+            }
+            Section {
                 HStack {
-                    VStack(alignment: .leading, spacing: DSSpacing.xs) {
-                        HStack(spacing: DSSpacing.sm) {
-                            Text(tool.name)
-                                .font(DSTypography.heading)
-                            if tool.hasDrift {
-                                DSBadge(text: L10n.driftState, tone: .warn)
-                            }
-                            if !tool.enabled {
-                                DSBadge(text: L10n.disabledMCP, tone: .neutral)
-                            }
-                        }
-                        Text(tool.id)
-                            .font(DSTypography.mono)
-                            .foregroundStyle(DSColor.textSecondary)
+                    if !isNew {
+                        Button(L10n.delete, role: .destructive) { confirmDelete = true }
                     }
                     Spacer()
-                    DSBadge(
-                        text: !tool.enabled ? L10n.disabledMCP : tool.secretsOk ? L10n.readyState : L10n.missingSecrets,
-                        tone: !tool.enabled ? .neutral : tool.secretsOk ? .good : .bad
-                    )
-                }
-
-                if let desc = tool.description {
-                    Text(desc)
-                        .font(DSTypography.body)
-                        .foregroundStyle(DSColor.textSecondary)
-                        .lineLimit(2)
-                }
-
-                HStack(spacing: DSSpacing.xl) {
-                    VStack(alignment: .leading, spacing: DSSpacing.xs) {
-                        Text(L10n.targets.uppercased())
-                            .font(DSTypography.caption)
-                            .foregroundStyle(DSColor.textSecondary)
-                        HStack(spacing: DSSpacing.xs) {
-                            if tool.apps.isEmpty {
-                                DSBadge(text: "Reserved", tone: .neutral)
-                            } else {
-                                ForEach(tool.apps, id: \.self) { app in
-                                    DSBadge(text: app, tone: .app)
-                                }
-                            }
-                        }
+                    Button(L10n.cancel, action: close)
+                    Button(L10n.save) {
+                        let saved = draft
+                        close()
+                        Task { await state.save(saved) }
                     }
-
-                    VStack(alignment: .leading, spacing: DSSpacing.xs) {
-                        Text(L10n.secretsSection.uppercased())
-                            .font(DSTypography.caption)
-                            .foregroundStyle(DSColor.textSecondary)
-                        HStack(spacing: DSSpacing.xs) {
-                            if tool.requiredSecrets.isEmpty {
-                                DSBadge(text: "none", tone: .neutral)
-                            } else {
-                                ForEach(tool.requiredSecrets, id: \.self) { secret in
-                                    DSBadge(
-                                        text: secret,
-                                        tone: tool.missingSecrets.contains(secret) ? .bad : .good
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
-                HStack(spacing: DSSpacing.xs) {
-                    Text("\(L10n.command):")
-                        .font(DSTypography.caption)
-                        .foregroundStyle(DSColor.textSecondary)
-                    Text(tool.command)
-                        .font(DSTypography.mono)
-                        .foregroundStyle(DSColor.textPrimary)
-                        .lineLimit(2)
-                    Spacer()
-                    Button(tool.enabled ? L10n.disableMCP : L10n.enableMCP, action: onToggle)
-                        .buttonStyle(.bordered)
-                    DSIconButton(systemName: "pencil", help: L10n.editMCP, action: onEdit)
-                    DSIconButton(systemName: "trash", help: L10n.removeMCP, action: onDelete)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(draft.command.isEmpty || (isNew && draft.id.isEmpty))
+                    .keyboardShortcut(.defaultAction)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .formStyle(.grouped)
+        .confirmationDialog(L10n.t("Delete \(draft.name)?", "删除 \(draft.name)？"), isPresented: $confirmDelete) {
+            Button(L10n.delete, role: .destructive) {
+                guard let server = state.mcps.first(where: { $0.id == draft.id }) else { return }
+                close()
+                Task { await state.remove(server) }
+            }
         }
     }
+
+    private func lines(_ binding: Binding<[String]>) -> Binding<String> {
+        Binding(
+            get: { binding.wrappedValue.joined(separator: "\n") },
+            set: { binding.wrappedValue = $0.split(separator: "\n", omittingEmptySubsequences: false).map(String.init).filter { !$0.isEmpty } }
+        )
+    }
+
+    private var envText: Binding<String> {
+        Binding(
+            get: { draft.env.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: "\n") },
+            set: { text in
+                var env: [String: String] = [:]
+                for line in text.split(separator: "\n") {
+                    let parts = line.split(separator: "=", maxSplits: 1)
+                    if parts.count == 2 { env[String(parts[0])] = String(parts[1]) }
+                }
+                draft.env = env
+            }
+        )
+    }
 }
 
-private struct MCPDraft {
-    let id: String
-    let name: String
-    let command: String
-    let args: [String]
-    let secrets: [String]
-    let env: [String: String]
-    let apps: AppFlags
-    let description: String?
-    let enabled: Bool
-}
-
-private struct MCPEditorSheet: View {
+private struct ImportSheet: View {
+    @Environment(AppState.self) private var state
     @Environment(\.dismiss) private var dismiss
-    let existing: ToolInfo?
-    let onSave: (MCPDraft) async -> Bool
-
-    @State private var id: String
-    @State private var name: String
-    @State private var command: String
-    @State private var argsText: String
-    @State private var secretsText: String
-    @State private var envText: String
-    @State private var descriptionText: String
-    @State private var claude: Bool
-    @State private var claudeDesktop: Bool
-    @State private var codex: Bool
-    @State private var hermes: Bool
-    @State private var enabled: Bool
-    @State private var saving = false
-
-    init(existing: ToolInfo?, onSave: @escaping (MCPDraft) async -> Bool) {
-        self.existing = existing
-        self.onSave = onSave
-        _id = State(initialValue: existing?.id ?? "")
-        _name = State(initialValue: existing?.name ?? "")
-        _command = State(initialValue: existing?.command ?? "")
-        _argsText = State(initialValue: existing?.args.joined(separator: "\n") ?? "")
-        _secretsText = State(initialValue: existing?.requiredSecrets.joined(separator: "\n") ?? "")
-        _envText = State(initialValue: existing?.env.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: "\n") ?? "")
-        _descriptionText = State(initialValue: existing?.description ?? "")
-        _claude = State(initialValue: existing?.apps.claude ?? true)
-        _claudeDesktop = State(initialValue: existing?.apps.claude_desktop ?? true)
-        _codex = State(initialValue: existing?.apps.codex ?? true)
-        _hermes = State(initialValue: existing?.apps.hermes ?? true)
-        _enabled = State(initialValue: existing?.enabled ?? true)
-    }
-
-    private var normalizedID: String {
-        let value = id.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return value.hasPrefix("agent-") ? value : "agent-\(value)"
-    }
-
-    private var valid: Bool {
-        normalizedID.range(of: "^agent-[a-z0-9][a-z0-9-]*$", options: .regularExpression) != nil
-            && !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && (claude || claudeDesktop || codex || hermes)
-    }
+    @State private var preview: MCPImportPreview?
+    @State private var failure: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: DSSpacing.xl) {
-            Text(existing == nil ? L10n.addMCP : L10n.editMCP)
-                .font(DSTypography.title)
-            Text(L10n.mcpEditorNote)
-                .font(DSTypography.caption)
-                .foregroundStyle(DSColor.textSecondary)
-
-            Form {
-                TextField(L10n.mcpID, text: $id)
-                    .disabled(existing != nil)
-                TextField(L10n.mcpName, text: $name)
-                TextField(L10n.mcpCommand, text: $command)
-                TextField(L10n.mcpDescription, text: $descriptionText)
-                VStack(alignment: .leading) {
-                    Text(L10n.mcpArguments).font(DSTypography.caption)
-                    TextEditor(text: $argsText).font(DSTypography.mono).frame(minHeight: 72)
+        VStack(alignment: .leading, spacing: DS.pad) {
+            Text(L10n.importMCPs.replacingOccurrences(of: "…", with: "")).font(.title2.weight(.semibold))
+            Text(L10n.t("MCP servers already configured in Claude Code, Claude Desktop, Codex or Hermes are moved here. Inline keys go into the secret store; the original files are backed up.",
+                        "把已经配置在 Claude Code、Claude Desktop、Codex、Hermes 里的 MCP 收进来统一管理。写在配置里的密钥会移进密钥库，原文件会先备份。"))
+                .foregroundStyle(.secondary)
+            if let preview {
+                Card {
+                    row(L10n.t("New", "新增"), preview.imported)
+                    row(L10n.t("Merged", "合并"), preview.merged)
+                    row(L10n.t("Secrets moved", "移入密钥库"), preview.secretNames)
+                    if !preview.skipped.isEmpty {
+                        row(L10n.t("Skipped (remote)", "跳过（远程类型）"), preview.skipped.map { "\($0.id) (\(AppNames.short($0.app)))" })
+                    }
                 }
-                VStack(alignment: .leading) {
-                    Text(L10n.mcpRequiredSecrets).font(DSTypography.caption)
-                    TextEditor(text: $secretsText).font(DSTypography.mono).frame(minHeight: 64)
-                }
-                VStack(alignment: .leading) {
-                    Text(L10n.mcpEnvironment).font(DSTypography.caption)
-                    TextEditor(text: $envText).font(DSTypography.mono).frame(minHeight: 64)
-                }
-                Section(L10n.targets) {
-                    Toggle("Claude Code", isOn: $claude)
-                    Toggle("Claude Desktop", isOn: $claudeDesktop)
-                    Toggle("Codex", isOn: $codex)
-                    Toggle("Hermes", isOn: $hermes)
-                }
-                Toggle(L10n.enableMCP, isOn: $enabled)
+            } else if let failure {
+                Text(failure).foregroundStyle(DS.bad)
+            } else {
+                ProgressView()
             }
-            .formStyle(.grouped)
-
             HStack {
-                Button(L10n.cancel) { dismiss() }
-                    .buttonStyle(.plain)
                 Spacer()
-                Button(existing == nil ? L10n.addMCP : L10n.saveMCP) {
-                    saving = true
-                    let args = argsText.split(whereSeparator: \.isNewline).map(String.init).filter { !$0.isEmpty }
-                    let separators = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: ","))
-                    let secrets = secretsText.components(separatedBy: separators).filter { !$0.isEmpty }.map { $0.uppercased() }
-                    var environment: [String: String] = [:]
-                    for line in envText.split(whereSeparator: \.isNewline) {
-                        let parts = line.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
-                        if parts.count == 2, !parts[0].isEmpty {
-                            environment[String(parts[0])] = String(parts[1])
-                        }
-                    }
-                    let draft = MCPDraft(
-                        id: normalizedID,
-                        name: name.trimmingCharacters(in: .whitespacesAndNewlines),
-                        command: command.trimmingCharacters(in: .whitespacesAndNewlines),
-                        args: args,
-                        secrets: Array(Set(secrets)).sorted(),
-                        env: environment,
-                        apps: AppFlags(claude: claude, claude_desktop: claudeDesktop, codex: codex, hermes: hermes),
-                        description: descriptionText.trimmingCharacters(in: .whitespacesAndNewlines),
-                        enabled: enabled
-                    )
-                    Task {
-                        if await onSave(draft) { dismiss() }
-                        saving = false
-                    }
+                Button(L10n.cancel) { dismiss() }
+                Button(L10n.t("Import", "导入")) {
+                    dismiss()
+                    Task { await state.importMCPs() }
                 }
-                .buttonStyle(.bordered)
-                .disabled(!valid || saving)
+                .buttonStyle(.borderedProminent)
+                .disabled((preview?.imported.isEmpty ?? true) && (preview?.merged.isEmpty ?? true))
             }
         }
-        .padding(DSSpacing.xxl)
-        .frame(width: 640, height: 720)
-        .background(DSColor.background)
+        .padding(DS.page)
+        .frame(width: 520)
+        .task {
+            do { preview = try await state.service.importPreview() } catch { failure = error.localizedDescription }
+        }
+    }
+
+    private func row(_ title: String, _ items: [String]) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(title).frame(width: 120, alignment: .leading).foregroundStyle(.secondary)
+            Text(items.isEmpty ? "—" : items.joined(separator: ", ")).font(.callout.monospaced())
+        }
     }
 }
