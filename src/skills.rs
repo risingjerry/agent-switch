@@ -560,6 +560,45 @@ pub fn promote(hub: &Hub, source: &str, reference: &str) -> Result<()> {
     write_json(&path, &Value::Object(registry))
 }
 
+/// Take Skills out of a source's catalog (`excluded = true`) or put them
+/// back. Files stay on disk. Returns the names that changed.
+pub fn set_excluded(hub: &Hub, source: &str, names: &[String], excluded: bool) -> Result<Vec<String>> {
+    let path = hub.root.join("config").join("registry.json");
+    let mut registry = read_json_object(&path)?;
+    let src = registry
+        .get_mut("sources")
+        .and_then(Value::as_object_mut)
+        .and_then(|m| m.get_mut(source))
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| format!("unknown source: {source}"))?;
+    let mut list: BTreeSet<String> = src
+        .get("exclude")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|v| v.as_str().map(String::from))
+        .collect();
+    let changed: Vec<String> = names
+        .iter()
+        .filter(|n| if excluded { list.insert((*n).clone()) } else { list.remove(*n) })
+        .cloned()
+        .collect();
+    if list.is_empty() {
+        src.remove("exclude");
+    } else {
+        src.insert("exclude".into(), json!(list));
+    }
+    write_json(&path, &Value::Object(registry))?;
+    Ok(changed)
+}
+
+/// Source that excludes `name`, if any.
+pub fn excluded_in(hub: &Hub, name: &str) -> Option<String> {
+    hub.sources().into_iter().find_map(|(id, spec)| {
+        spec.get("exclude")?.as_array()?.iter().any(|v| v.as_str() == Some(name)).then_some(id)
+    })
+}
+
 // ---- status / report ----
 
 pub fn status_lines(hub: &Hub, agent_home: &Path) -> Vec<String> {
@@ -687,8 +726,15 @@ pub fn report(hub_root: &Path) -> Result<Value> {
         }));
         let mut rels = discover_paths(&root);
         rels.extend(active.keys().filter(|(src, _)| *src == id).map(|(_, p)| p.clone()));
+        // `exclude`: Skills taken out of the catalog (files stay on disk).
+        let exclude: BTreeSet<&str> =
+            spec.get("exclude").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).collect();
         for rel in rels {
             let key = (id.clone(), rel.clone());
+            let leaf = rel.rsplit('/').next().unwrap_or(&rel);
+            if !active.contains_key(&key) && (exclude.contains(rel.as_str()) || exclude.contains(leaf)) {
+                continue;
+            }
             let (mut profs, act_name) = active.get(&key).cloned().unwrap_or_default();
             seen.insert(key);
             profs.sort();

@@ -73,6 +73,8 @@ fn desired_settings(plan: &Plan, current: &str) -> Result<String> {
     // skillOverrides: on-demand names are name-only; resident and unknown
     // names are left to the user.
     let mut overrides = root.get("skillOverrides").and_then(Value::as_object).cloned().unwrap_or_default();
+    // name-only entries for Skills that left the catalog are stale.
+    overrides.retain(|name, v| v.as_str() != Some("name-only") || plan.links.contains_key(name));
     for name in plan.links.keys() {
         if plan.resident.contains(name) {
             if overrides.get(name).and_then(Value::as_str) == Some("name-only") {
@@ -176,7 +178,7 @@ mod tests {
                 .collect(),
             resident: vec!["fusebox".into()],
         };
-        let current = r#"{"theme":"dark","skillOverrides":{"mine":"off","fusebox":"name-only"},"hooks":{"UserPromptSubmit":[{"hooks":[{"type":"command","command":"other"}]}]}}"#;
+        let current = r#"{"theme":"dark","skillOverrides":{"mine":"off","fusebox":"name-only","gone":"name-only"},"hooks":{"UserPromptSubmit":[{"hooks":[{"type":"command","command":"other"}]}]}}"#;
         let out = desired_settings(&plan, current).unwrap();
         let v: Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["theme"], "dark");

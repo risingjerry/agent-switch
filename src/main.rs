@@ -4,6 +4,8 @@
 mod claude;
 mod config;
 mod doctor;
+mod eval;
+mod find;
 mod hub;
 mod imports;
 mod instructions;
@@ -162,7 +164,9 @@ Usage: fusebox [--home DIR] [--user-home DIR] [--config FILE] <command>
   skills status|fetch|promote|enable|disable|sync|sync-global|update
   skills usage [--days 60] [--json]     what each agent actually used
   skills prune [--days 60] [--profile global] [--apply]
+  skills drop|restore NAME...          take Skills out of the catalog / put them back (files kept)
   find WORDS [--json]                  one catalog: on-demand Skills and MCP servers for a task
+  eval [--days 60] [--json]            score find on prompt→Skill pairs from past sessions
   advise [--days 60] [--lang zh] [--json]  suggestions (with commands) for an agent to apply
   run ID [ARGS...]                      start an MCP with only its secrets (used by wrappers)
   hub APP                               lazy MCP proxy (used by the agent-hub entry)
@@ -239,6 +243,7 @@ fn dispatch(argv: &[String]) -> Result<i32> {
         "mcp" => cmd_mcp(&ctx, &rest),
         "advise" => cmd_advise(&ctx, &rest),
         "find" => cmd_find(&ctx, &rest),
+        "eval" => cmd_eval(&ctx, &rest),
         "secret" => cmd_secret(&ctx, &rest),
         "skills" => cmd_skills(&ctx, &rest),
         "hub" => {
@@ -682,6 +687,41 @@ fn cmd_skills(ctx: &Ctx, a: &Args) -> Result<i32> {
             }
         }
         // Resident only in --to (taken off --from, default global).
+        // Out of the catalog (not resident, not on demand); files are kept.
+        "drop" | "restore" => {
+            a.check(&["source"])?;
+            let names = &a.pos[1..];
+            if names.is_empty() {
+                return Err(format!("usage: fusebox skills {sub} NAME... [--source S]").into());
+            }
+            let hub = ctx.hub()?;
+            let catalog = skills::catalog(&ctx.hub_root())?;
+            let mut by_source: BTreeMap<String, Vec<String>> = BTreeMap::new();
+            for name in names {
+                let source = match a.one("source") {
+                    Some(s) => s.to_string(),
+                    None if sub == "drop" => {
+                        let entry = catalog.iter().find(|e| &e.name == name).ok_or(format!("no Skill named {name}"))?;
+                        if !entry.profiles.is_empty() {
+                            return Err(format!(
+                                "{name} is resident in {}; make it on demand first",
+                                entry.profiles.join(", ")
+                            )
+                            .into());
+                        }
+                        entry.id.split_once(':').map(|(s, _)| s.to_string()).unwrap_or_default()
+                    }
+                    None => skills::excluded_in(&hub, name).ok_or(format!("{name} is not dropped"))?,
+                };
+                by_source.entry(source).or_default().push(name.clone());
+            }
+            for (source, names) in by_source {
+                for name in skills::set_excluded(&hub, &source, &names, sub == "drop")? {
+                    print(&format!("{}: {name} ({source})\n", if sub == "drop" { "dropped" } else { "restored" }));
+                }
+            }
+            print("run `fusebox reconcile` to update agents\n");
+        }
         "move" => {
             a.check(&["to", "from"])?;
             let name = a.pos(1, "SKILL")?;
@@ -1369,173 +1409,52 @@ fn cmd_advise(ctx: &Ctx, a: &Args) -> Result<i32> {
 
 // ---- find: one catalog for Skills and MCP servers ----
 
-/// Git root (or the directory itself) for attributing past use to "this project".
-fn project_root(dir: &std::path::Path) -> PathBuf {
-    let mut cur = Some(dir);
-    while let Some(d) = cur {
-        if d.join(".git").exists() {
-            return d.to_path_buf();
-        }
-        cur = d.parent();
+fn cmd_eval(ctx: &Ctx, a: &Args) -> Result<i32> {
+    a.check(&["json", "days"])?;
+    let days = a.one("days").and_then(|v| v.parse().ok()).unwrap_or(60);
+    let hub_root = ctx.hub_root();
+    let finder = find::Finder::load(&ctx.paths, &hub_root, &ctx.config_path, &ctx.config()?);
+    let catalog: BTreeSet<String> = skills::catalog(&hub_root)?.into_iter().map(|e| e.name).collect();
+    let mut report = eval::run(&ctx.paths, &finder, &catalog, days);
+    let history = ctx.paths.cache_dir.join("eval-history.jsonl");
+    let previous = std::fs::read_to_string(&history)
+        .ok()
+        .and_then(|t| t.lines().last().and_then(|l| serde_json::from_str::<Value>(l).ok()));
+    let row = json!({"at": skills::now_iso(), "pairs": report["pairs"], "top1": report["top1"], "top5": report["top5"],
+        "textTop1": report["textTop1"], "textTop5": report["textTop5"]});
+    util::ensure_private_dir(&ctx.paths.cache_dir);
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&history) {
+        use std::io::Write;
+        let _ = writeln!(f, "{row}");
     }
-    dir.to_path_buf()
-}
-
-/// Chinese ↔ English terms people use interchangeably for the same tool;
-/// the query is widened with the other side so either language matches.
-const SYNONYMS: &[(&str, &str)] = &[
-    ("手机", "iphone phone mobile"),
-    ("截图", "screenshot screen"),
-    ("屏幕", "screen"),
-    ("点击", "tap click"),
-    ("画图", "diagram draw canvas"),
-    ("图表", "chart diagram"),
-    ("生图", "image generate"),
-    ("配图", "image illustration"),
-    ("图片", "image"),
-    ("公众号", "wechat official account"),
-    ("微信", "wechat"),
-    ("小红书", "xiaohongshu xhs"),
-    ("抖音", "douyin"),
-    ("推特", "twitter x"),
-    ("飞书", "lark feishu"),
-    ("邮件", "email mail"),
-    ("邮箱", "email mail"),
-    ("部署", "deploy release"),
-    ("上线", "deploy release"),
-    ("发布", "publish release"),
-    ("搜索", "search"),
-    ("调研", "research"),
-    ("视频", "video"),
-    ("剪辑", "edit video jianying"),
-    ("剪映", "jianying"),
-    ("逆向", "reverse engineer"),
-    ("反编译", "decompile reverse"),
-    ("翻译", "translate"),
-    ("文章", "article"),
-    ("写作", "writing"),
-    ("退款", "refund"),
-    ("充值", "topup recharge"),
-    ("对账", "reconciliation"),
-    ("价格", "price pricing"),
-    ("公告", "announcement"),
-    ("通知", "notify notification"),
-    ("测试", "test"),
-    ("代码审查", "code review"),
-    ("提交", "commit"),
-    ("设计", "design"),
-    ("前端", "frontend ui"),
-    ("清理", "cleanup clean"),
-    ("磁盘", "disk"),
-    ("密钥", "secret key"),
-    ("支付宝", "alipay"),
-    ("转写", "transcribe transcript"),
-    ("录音", "audio recording"),
-];
-
-fn widen_query(query: &str) -> String {
-    let lower = query.to_lowercase();
-    let mut out = query.to_string();
-    for (zh, en) in SYNONYMS {
-        if query.contains(zh) {
-            out.push(' ');
-            out.push_str(en);
-        }
-        if en.split(' ').any(|w| lower.split(|c: char| !c.is_ascii_alphanumeric()).any(|q| q == w)) {
-            out.push(' ');
-            out.push_str(zh);
-        }
+    report["previous"] = previous.clone().unwrap_or(Value::Null);
+    if a.flag("json") {
+        print(&(json_ordered(&report) + "\n"));
+        return Ok(0);
     }
-    out
-}
-
-/// Ranked Skills and MCP servers for a task. BM25 on name/description (and
-/// cached tool names for MCPs), plus a prior from how often each item was
-/// used in this project and overall.
-fn find_hits(ctx: &Ctx, query: &str, cwd: &std::path::Path, limit: usize) -> Result<Vec<Value>> {
-    let stats = usage::collect(&ctx.paths, 90).ok();
-    let root = project_root(cwd);
-    let prior = |u: Option<usage::SkillUse>| -> (f64, f64) {
-        let Some(u) = u else { return (0.0, 0.0) };
-        let here: usize =
-            u.cwds.iter().filter(|(c, _)| std::path::Path::new(c).starts_with(&root)).map(|(_, n)| n).sum();
-        ((here as f64).ln_1p(), (u.total() as f64).ln_1p())
-    };
-    let mut items: Vec<(String, String, Value, (f64, f64))> = Vec::new();
-    let catalog = skills::catalog(&ctx.hub_root()).unwrap_or_default();
-    let mut seen = BTreeSet::new();
-    for e in &catalog {
-        if !seen.insert(e.name.clone()) {
-            continue;
-        }
-        let u = stats
-            .as_ref()
-            .map(|s| s.lookup(&e.name, e.skill_md.parent().and_then(|p| p.file_name()).and_then(|n| n.to_str())));
-        items.push((
-            e.name.replace('-', " "),
-            e.description.clone(),
-            json!({"kind": "skill", "name": e.name, "description": e.description,
-                   "resident": !e.profiles.is_empty(), "use": format!("fusebox skills show {}", e.name)}),
-            prior(u),
-        ));
-    }
-    let config = ctx.config()?;
-    for tool in config.tools.iter().filter(|t| t.enabled) {
-        let tools: Vec<(String, String)> = hub::cached_manifest(&ctx.paths, &tool.id)
-            .and_then(|m| m["tools"].as_array().cloned())
-            .unwrap_or_default()
-            .iter()
-            .map(|t| {
-                (t["name"].as_str().unwrap_or("").to_string(), t["description"].as_str().unwrap_or("").to_string())
-            })
-            .collect();
-        let short = tool.id.trim_start_matches("agent-").replace('-', "_");
-        let text = format!(
-            "{} {}",
-            tool.description.as_str().unwrap_or(""),
-            tools
-                .iter()
-                .map(|(n, d)| format!("{n} {}", d.chars().take(200).collect::<String>()))
-                .collect::<Vec<_>>()
-                .join(" ")
-        );
-        let usage = if tool.mode == Mode::Hub {
-            format!(
-                "agent-hub MCP: fusebox_servers {{\"server\": \"{short}\"}} starts it and lists its tools; then fusebox_call"
-            )
-        } else {
-            format!("resident: call its tools directly as mcp__{}__<tool>", tool.id)
-        };
-        let u = stats.as_ref().and_then(|s| s.mcps.get(&tool.id).cloned());
-        items.push((
-            format!("{} {}", tool.name, short.replace('_', " ")),
-            text,
-            json!({"kind": "mcp", "name": tool.name, "server": short, "description": tool.description,
-                   "resident": tool.mode == Mode::Direct, "tools": tools.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>(),
-                   "use": usage}),
-            prior(u),
-        ));
-    }
-    let docs: Vec<(String, String)> = items.iter().map(|(n, t, _, _)| (n.clone(), t.clone())).collect();
-    let index = skills::Bm25::new(&docs);
-    let query = &widen_query(query);
-    let mut scored: Vec<(f64, Value)> = items
-        .into_iter()
-        .enumerate()
-        .filter_map(|(i, (_, _, mut v, (here, total)))| {
-            let text = index.score(i, query);
-            if text <= 0.0 {
-                return None;
-            }
-            let score = text + 1.5 * here + 0.3 * total;
-            v["score"] = json!((score * 100.0).round() / 100.0);
-            v["match"] = json!((text * 100.0).round() / 100.0);
-            Some((score, v))
+    let delta = |key: &str| {
+        previous.as_ref().and_then(|p| p[key].as_f64()).map_or(String::new(), |before| {
+            let d = report[key].as_f64().unwrap_or(0.0) - before;
+            if d.abs() < 0.05 { " (=)".into() } else { format!(" ({d:+.1})") }
         })
-        .collect();
-    scored.sort_by(|a, b| b.0.total_cmp(&a.0));
-    scored.truncate(limit);
-    Ok(scored.into_iter().map(|(_, v)| v).collect())
+    };
+    print(&format!(
+        "{} prompt→Skill pairs from the last {days} days ({} Skills)\n\
+         with usage prior: top-1 {}%{}  top-5 {}%{}\n\
+         text only:        top-1 {}%{}  top-5 {}%{}\n",
+        report["pairs"], report["skills"],
+        report["top1"], delta("top1"), report["top5"], delta("top5"),
+        report["textTop1"], delta("textTop1"), report["textTop5"], delta("textTop5"),
+    ));
+    let misses = report["misses"].as_array().cloned().unwrap_or_default();
+    if !misses.is_empty() {
+        print(&format!("\nmissed ({}):\n", misses.len()));
+        for m in misses.iter().take(15) {
+            print(&format!("  {} ← \"{}\" (got {})\n", m["skill"].as_str().unwrap_or(""),
+                m["query"].as_str().unwrap_or(""), m["got"]));
+        }
+    }
+    Ok(0)
 }
 
 fn cmd_find(ctx: &Ctx, a: &Args) -> Result<i32> {
@@ -1546,7 +1465,8 @@ fn cmd_find(ctx: &Ctx, a: &Args) -> Result<i32> {
     }
     let limit = a.one("limit").and_then(|v| v.parse().ok()).unwrap_or(5);
     let cwd = a.one("cwd").map(util::expand_user).unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
-    let hits = find_hits(ctx, &query, &cwd, limit)?;
+    let finder = find::Finder::load(&ctx.paths, &ctx.hub_root(), &ctx.config_path, &ctx.config()?);
+    let hits = finder.hits(&query, Some(&find::project_root(&cwd)), limit);
     if a.flag("json") {
         print(&(json_ordered(&json!({"query": query, "results": hits})) + "\n"));
         return Ok(0);
