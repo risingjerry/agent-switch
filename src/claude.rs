@@ -1,9 +1,9 @@
 //! Claude Code projection of the two-state model.
 //!
-//! Every Skill on disk is linked into `~/.claude/skills`; resident ones list
-//! in full, on-demand ones are `name-only` in `skillOverrides`, so Claude
-//! always sees every name (an index that costs a few tokens each) and loads
-//! the body when it picks one.
+//! Every Skill on disk is linked into `~/.claude/skills`; resident ones and
+//! the most used on-demand ones list with their description, the rest are
+//! `name-only` in `skillOverrides`, so Claude always sees every name (an
+//! index that costs a few tokens each) and loads the body when it picks one.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -24,6 +24,8 @@ pub struct Plan {
     /// name → skill directory
     pub links: BTreeMap<String, PathBuf>,
     pub resident: Vec<String>,
+    /// On-demand Skills listed with their description (the most used).
+    pub described: Vec<String>,
 }
 
 fn link_target(path: &Path) -> Option<PathBuf> {
@@ -56,11 +58,13 @@ pub fn plan(paths: &Paths, hub_root: &Path) -> Result<Plan> {
     }
     let hub = skills::Hub::load(hub_root)?;
     let resident = skills::enabled_skills(&hub, "global")?.into_iter().map(|(n, _)| n).collect();
+    let described = crate::find::often_used(paths, hub_root).into_iter().map(|(n, _)| n).collect();
     Ok(Plan {
         skills_dir: paths.user_home.join(".claude").join("skills"),
         settings: paths.user_home.join(".claude").join("settings.json"),
         links,
         resident,
+        described,
     })
 }
 
@@ -70,13 +74,14 @@ fn desired_settings(plan: &Plan, current: &str) -> Result<String> {
     } else {
         serde_json::from_str(current).map_err(|e| format!("malformed ~/.claude/settings.json: {e}"))?
     };
-    // skillOverrides: on-demand names are name-only; resident and unknown
-    // names are left to the user.
+    // skillOverrides: on-demand names are name-only, except the most used,
+    // which keep their description; resident and unknown names are left to
+    // the user. Bodies load on use either way.
     let mut overrides = root.get("skillOverrides").and_then(Value::as_object).cloned().unwrap_or_default();
     // name-only entries for Skills that left the catalog are stale.
     overrides.retain(|name, v| v.as_str() != Some("name-only") || plan.links.contains_key(name));
     for name in plan.links.keys() {
-        if plan.resident.contains(name) {
+        if plan.resident.contains(name) || plan.described.contains(name) {
             if overrides.get(name).and_then(Value::as_str) == Some("name-only") {
                 overrides.remove(name);
             }
@@ -177,6 +182,7 @@ mod tests {
                 .into_iter()
                 .collect(),
             resident: vec!["fusebox".into()],
+            described: vec![],
         };
         let current = r#"{"theme":"dark","skillOverrides":{"mine":"off","fusebox":"name-only","gone":"name-only"},"hooks":{"UserPromptSubmit":[{"hooks":[{"type":"command","command":"other"}]}]}}"#;
         let out = desired_settings(&plan, current).unwrap();

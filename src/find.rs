@@ -102,6 +102,39 @@ fn widen_query(query: &str) -> String {
     out
 }
 
+/// How many on-demand Skills carry a one-line description in agents' name
+/// lists. Measured on 112 real prompts: names plus the 30 most used with a
+/// line picks better than names alone (and than a line for every Skill) at
+/// a third of the all-described size.
+pub const DESCRIBED: usize = 30;
+
+/// First sentence of a description, at most 110 characters.
+pub fn one_line(description: &str) -> String {
+    let flat = description.split_whitespace().collect::<Vec<_>>().join(" ");
+    let end = flat.find(|c| matches!(c, '。' | '；' | ';')).map(|i| i + 3).unwrap_or(flat.len());
+    let end = flat.find(". ").map_or(end, |i| end.min(i + 1));
+    flat[..end.min(flat.len())].trim_end_matches(['；', ';']).chars().take(110).collect()
+}
+
+/// The on-demand Skills used most in the last 90 days (at least twice),
+/// with a one-line description each, most used first.
+pub fn often_used(paths: &Paths, hub_root: &Path) -> Vec<(String, String)> {
+    let Ok(stats) = usage::collect(paths, 90) else { return Vec::new() };
+    let mut seen = BTreeSet::new();
+    let mut rows: Vec<(usize, String, String)> = skills::catalog(hub_root)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|e| e.profiles.is_empty() && seen.insert(e.name.clone()))
+        .map(|e| {
+            let dir = e.skill_md.parent().and_then(|p| p.file_name()).and_then(|n| n.to_str()).map(String::from);
+            (stats.lookup(&e.name, dir.as_deref()).total(), one_line(&e.description), e.name)
+        })
+        .filter(|(n, _, _)| *n >= 2)
+        .collect();
+    rows.sort_by(|a, b| b.0.cmp(&a.0).then(a.2.cmp(&b.2)));
+    rows.into_iter().take(DESCRIBED).map(|(_, d, n)| (n, d)).collect()
+}
+
 /// Extra phrases per Skill name or MCP id, kept in the Skill Hub so they
 /// survive upstream updates of vendor Skills.
 pub fn aliases_path(hub_root: &Path) -> PathBuf {

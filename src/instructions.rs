@@ -84,9 +84,17 @@ fn catalog_index(paths: &Paths) -> String {
     if names.is_empty() && servers.is_empty() {
         return String::new();
     }
-    let mut out = String::from("\nOn-demand catalog (names only — load what fits the task):\n");
+    let often = crate::find::often_used(paths, &skill_hub_dir(paths));
+    names.retain(|n| !often.iter().any(|(o, _)| o == n));
+    let mut out = String::from("\nOn-demand catalog (load what fits the task with `fusebox skills show NAME`):\n");
+    if !often.is_empty() {
+        out.push_str("- Often used Skills:\n");
+        for (name, line) in &often {
+            out.push_str(&format!("  - {name}: {line}\n"));
+        }
+    }
     if !names.is_empty() {
-        out.push_str(&format!("- Skills (`fusebox skills show NAME`): {}\n", names.join(", ")));
+        out.push_str(&format!("- Other Skills: {}\n", names.join(", ")));
     }
     if !servers.is_empty() {
         out.push_str(&format!(

@@ -1338,6 +1338,36 @@ fn cmd_advise(ctx: &Ctx, a: &Args) -> Result<i32> {
                     Some(date) => u.since(&date),
                     None => u.total(),
                 };
+                // Used often while resident, rarely since: agents may no
+                // longer find it on demand.
+                if let Some(date) = skills::on_demand_since(&hub, &e.name)
+                    && let Some(drop) = drop_off(&u, &date)
+                {
+                    let (before, after, days) = drop;
+                    let (source, path) =
+                        e.id.split_once(':').map(|(a, b)| (a.to_string(), b.to_string())).unwrap_or_default();
+                    out.push(suggestion(
+                        format!("skills.dropoff.{}", e.name),
+                        "skill",
+                        tr(format!("{} may be hard to find on demand", e.name), format!("{} 改成按需后可能不好找了", e.name)),
+                        tr(
+                            format!(
+                                "Used {before} times in the 30 days before it went on demand ({date}), {after} in the {days} days since. \
+                                 Add the words people use for it to config/aliases.json, or make it resident."
+                            ),
+                            format!(
+                                "改成按需（{date}）前 30 天用了 {before} 次，之后 {days} 天只用了 {after} 次。\
+                                 可以把常说的叫法加进 config/aliases.json，或改回常驻。"
+                            ),
+                        ),
+                        vec![
+                            format!("fusebox skills enable global {} --source {source} --path {path}", e.name),
+                            "fusebox skills sync-global --prune".into(),
+                        ],
+                        false,
+                    ));
+                    continue;
+                }
                 if loads < 3 {
                     continue;
                 }
@@ -1405,6 +1435,22 @@ fn cmd_advise(ctx: &Ctx, a: &Args) -> Result<i32> {
         }
     }
     Ok(0)
+}
+
+/// (uses in the 30 days before `since`, uses after, days after) when a Skill
+/// used at least 6 times before going on demand has, at least a week later,
+/// fallen below 30% of its earlier rate.
+fn drop_off(u: &usage::SkillUse, since: &str) -> Option<(usize, usize, usize)> {
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok()?.as_secs() as i64;
+    let days = (0..400).take_while(|k| usage::date_of(now - k * 86_400).as_str() >= since).count().saturating_sub(1);
+    let before = u
+        .times
+        .iter()
+        .filter(|t| usage::date_of(**t).as_str() < since && usage::date_of(**t + 30 * 86_400).as_str() >= since)
+        .count();
+    let after = u.since(since);
+    (days >= 7 && before >= 6 && (after as f64) < 0.3 * before as f64 * days.min(30) as f64 / 30.0)
+        .then_some((before, after, days))
 }
 
 // ---- find: one catalog for Skills and MCP servers ----
@@ -1486,4 +1532,26 @@ fn cmd_find(ctx: &Ctx, a: &Args) -> Result<i32> {
         ));
     }
     Ok(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn drop_off_needs_a_real_fall() {
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+        let since = usage::date_of(now - 10 * 86_400);
+        let busy = |n: i64, from: i64| (0..n).map(|i| now - (from + i) * 86_400).collect::<Vec<_>>();
+        // 8 uses in the 30 days before, none in the 10 days since: flagged.
+        let u = usage::SkillUse { times: busy(8, 12), ..Default::default() };
+        assert_eq!(drop_off(&u, &since), Some((8, 0, 10)));
+        // Still used at a similar rate: not flagged.
+        let mut times = busy(8, 12);
+        times.extend(busy(3, 1));
+        let u = usage::SkillUse { times, ..Default::default() };
+        assert_eq!(drop_off(&u, &since), None);
+        // Too recent to judge.
+        assert_eq!(drop_off(&usage::SkillUse { times: busy(8, 4), ..Default::default() }, &usage::date_of(now - 2 * 86_400)), None);
+    }
 }
