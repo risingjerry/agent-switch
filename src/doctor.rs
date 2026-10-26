@@ -216,7 +216,7 @@ pub fn claude_plan(config: &Config, paths: &Paths) -> Option<crate::claude::Plan
     if !hub_root.join("config").join("registry.json").exists() {
         return None;
     }
-    crate::claude::plan(paths, &hub_root, &self_binary()).ok()
+    crate::claude::plan(paths, &hub_root).ok()
 }
 
 pub fn run(config: &Config, paths: &Paths) -> Result<Report> {

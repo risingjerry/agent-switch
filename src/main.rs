@@ -239,7 +239,6 @@ fn dispatch(argv: &[String]) -> Result<i32> {
         "mcp" => cmd_mcp(&ctx, &rest),
         "advise" => cmd_advise(&ctx, &rest),
         "find" => cmd_find(&ctx, &rest),
-        "hook" => cmd_hook(&ctx, &rest),
         "secret" => cmd_secret(&ctx, &rest),
         "skills" => cmd_skills(&ctx, &rest),
         "hub" => {
@@ -1530,6 +1529,7 @@ fn find_hits(ctx: &Ctx, query: &str, cwd: &std::path::Path, limit: usize) -> Res
             }
             let score = text + 1.5 * here + 0.3 * total;
             v["score"] = json!((score * 100.0).round() / 100.0);
+            v["match"] = json!((text * 100.0).round() / 100.0);
             Some((score, v))
         })
         .collect();
@@ -1565,42 +1565,5 @@ fn cmd_find(ctx: &Ctx, a: &Args) -> Result<i32> {
             v["use"].as_str().unwrap_or("")
         ));
     }
-    Ok(0)
-}
-
-// ---- hook: per-prompt hints for Claude Code ----
-
-/// `UserPromptSubmit` hook. Reads the hook JSON on stdin and, when Fusebox
-/// has a confident match for the prompt, adds one short context block.
-/// Always exits 0 and stays silent on any problem: a hint must never block
-/// the user's prompt.
-fn cmd_hook(ctx: &Ctx, a: &Args) -> Result<i32> {
-    if a.pos.first().map(String::as_str) != Some("claude-prompt") {
-        return Err("usage: fusebox hook claude-prompt  (reads the hook JSON on stdin)".into());
-    }
-    use std::io::Read;
-    let mut input = String::new();
-    let _ = std::io::stdin().take(1 << 20).read_to_string(&mut input);
-    let Ok(event) = serde_json::from_str::<Value>(&input) else { return Ok(0) };
-    let prompt = event["prompt"].as_str().unwrap_or("").trim();
-    if prompt.is_empty() || prompt.starts_with('/') {
-        return Ok(0);
-    }
-    let cwd = event["cwd"].as_str().map(PathBuf::from).unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
-    let Ok(hits) = find_hits(ctx, prompt, &cwd, 3) else { return Ok(0) };
-    // Only confident matches; a weak list is noise every turn.
-    let strong: Vec<&Value> = hits.iter().filter(|h| h["score"].as_f64().unwrap_or(0.0) >= 6.0).collect();
-    if strong.is_empty() {
-        return Ok(0);
-    }
-    let mut lines =
-        vec!["Fusebox: on-demand skills/MCP servers that may fit this request (load only if relevant):".to_string()];
-    for h in strong {
-        let desc: String = h["description"].as_str().unwrap_or("").chars().take(100).collect();
-        lines.push(format!("- {} — {desc} → {}", h["name"].as_str().unwrap_or(""), h["use"].as_str().unwrap_or("")));
-    }
-    let out =
-        json!({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": lines.join("\n")}});
-    print(&(out.to_string() + "\n"));
     Ok(0)
 }

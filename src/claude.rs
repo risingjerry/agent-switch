@@ -3,8 +3,7 @@
 //! Every Skill on disk is linked into `~/.claude/skills`; resident ones list
 //! in full, on-demand ones are `name-only` in `skillOverrides`, so Claude
 //! always sees every name (an index that costs a few tokens each) and loads
-//! the body when it picks one. A `UserPromptSubmit` hook adds the best
-//! Fusebox matches for each prompt.
+//! the body when it picks one.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -25,7 +24,6 @@ pub struct Plan {
     /// name → skill directory
     pub links: BTreeMap<String, PathBuf>,
     pub resident: Vec<String>,
-    pub hook_command: String,
 }
 
 fn link_target(path: &Path) -> Option<PathBuf> {
@@ -34,7 +32,7 @@ fn link_target(path: &Path) -> Option<PathBuf> {
     Some(crate::util::resolve_lenient(&abs))
 }
 
-pub fn plan(paths: &Paths, hub_root: &Path, bin: &str) -> Result<Plan> {
+pub fn plan(paths: &Paths, hub_root: &Path) -> Result<Plan> {
     let mut links: BTreeMap<String, PathBuf> = BTreeMap::new();
     let catalog = skills::catalog(hub_root)?;
     // Resident copies win when the same name exists in several sources.
@@ -63,7 +61,6 @@ pub fn plan(paths: &Paths, hub_root: &Path, bin: &str) -> Result<Plan> {
         settings: paths.user_home.join(".claude").join("settings.json"),
         links,
         resident,
-        hook_command: format!("{bin}{HOOK_MARKER}"),
     })
 }
 
@@ -86,17 +83,22 @@ fn desired_settings(plan: &Plan, current: &str) -> Result<String> {
         }
     }
     root.insert("skillOverrides".into(), Value::Object(overrides));
-    // One UserPromptSubmit hook entry owned by Fusebox.
-    let hooks = root.entry("hooks").or_insert_with(|| json!({}));
-    if let Some(hooks) = hooks.as_object_mut() {
-        let list = hooks.entry("UserPromptSubmit").or_insert_with(|| json!([]));
-        if let Some(arr) = list.as_array_mut() {
+    // Fusebox does not hook prompts: per-prompt hints were mostly noise
+    // (~30% right on real prompts). Remove the entry earlier versions added
+    // and drop containers left empty.
+    if let Some(hooks) = root.get_mut("hooks").and_then(Value::as_object_mut) {
+        if let Some(arr) = hooks.get_mut("UserPromptSubmit").and_then(Value::as_array_mut) {
             arr.retain(|group| {
                 !group["hooks"]
                     .as_array()
                     .is_some_and(|hs| hs.iter().any(|h| h["command"].as_str().is_some_and(|c| c.contains(HOOK_MARKER))))
             });
-            arr.push(json!({"hooks": [{"type": "command", "command": plan.hook_command, "timeout": 5}]}));
+            if arr.is_empty() {
+                hooks.remove("UserPromptSubmit");
+            }
+        }
+        if hooks.is_empty() {
+            root.remove("hooks");
         }
     }
     Ok(json_ordered(&Value::Object(root)) + "\n")
@@ -119,7 +121,7 @@ pub fn diff(plan: &Plan) -> Result<Vec<String>> {
     }
     let current = read_text(&plan.settings)?;
     if desired_settings(plan, &current)? != current {
-        out.push("skillOverrides / prompt hook differ".into());
+        out.push("skillOverrides differ".into());
     }
     Ok(out)
 }
@@ -173,14 +175,14 @@ mod tests {
                 .into_iter()
                 .collect(),
             resident: vec!["fusebox".into()],
-            hook_command: "/bin/fusebox hook claude-prompt".into(),
         };
         let current = r#"{"theme":"dark","skillOverrides":{"mine":"off","fusebox":"name-only"},"hooks":{"UserPromptSubmit":[{"hooks":[{"type":"command","command":"other"}]}]}}"#;
         let out = desired_settings(&plan, current).unwrap();
         let v: Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["theme"], "dark");
         assert_eq!(v["skillOverrides"], json!({"mine": "off", "a": "name-only"}));
-        assert_eq!(v["hooks"]["UserPromptSubmit"].as_array().unwrap().len(), 2);
+        // The user's own hook stays; nothing of Fusebox's is added.
+        assert_eq!(v["hooks"]["UserPromptSubmit"].as_array().unwrap().len(), 1);
         // Idempotent: a second pass changes nothing.
         assert_eq!(desired_settings(&plan, &out).unwrap(), out);
     }
