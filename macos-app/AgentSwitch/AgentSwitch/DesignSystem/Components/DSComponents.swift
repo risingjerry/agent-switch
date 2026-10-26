@@ -100,11 +100,8 @@ struct LanguageMenu: View {
             }
             .pickerStyle(.inline)
         } label: {
-            Label(L10n.chinese ? "中文" : "English", systemImage: "globe")
-                .font(.callout)
+            Label(L10n.language, systemImage: "globe")
         }
-        .menuStyle(.borderlessButton)
-        .fixedSize()
         .help(L10n.language)
     }
 }

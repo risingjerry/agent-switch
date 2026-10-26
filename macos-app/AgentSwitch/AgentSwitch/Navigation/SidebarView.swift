@@ -55,10 +55,7 @@ struct SidebarView: View {
     }
 
     private var footer: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            LanguageMenu()
-            health
-        }
+        health
         .padding(.horizontal, DS.pad)
         .padding(.vertical, 12)
     }

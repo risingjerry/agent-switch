@@ -182,10 +182,12 @@ struct SkillUsage: Decodable {
         let profiles: [String]
         let claude: Int
         let codex: Int
+        let deepseek: Int?
         let lastUsed: String
         let listingChars: Int
         var id: String { name }
-        var total: Int { claude + codex }
+        var ds: Int { deepseek ?? 0 }
+        var total: Int { claude + codex + ds }
     }
     let days: Int
     let sessions: [String: Int]
@@ -205,6 +207,20 @@ struct PrunePlan: Decodable {
     let applied: Bool
     let disabled: [String]
     let protected: [Protected]
+}
+
+struct Advice: Decodable {
+    struct Suggestion: Decodable, Identifiable {
+        let id: String
+        let kind: String
+        let title: String
+        let reason: String
+        let commands: [String]
+        let needsHuman: Bool
+        let items: [String]?
+    }
+    let days: Int
+    let suggestions: [Suggestion]
 }
 
 struct SecretNames: Decodable {

@@ -14,6 +14,7 @@ struct DashboardView: View {
             VStack(alignment: .leading, spacing: DS.page) {
                 hero
                 tiles
+                AdviceCard(advice: state.advice)
                 AgentsStrip(agents: state.agents)
                 if let doctor = state.doctor, !doctor.findings.isEmpty {
                     findings(doctor.findings)
@@ -26,7 +27,10 @@ struct DashboardView: View {
             .frame(maxWidth: 1000, alignment: .leading)
         }
         .navigationTitle(L10n.overview)
-        .task { if state.usage == nil { await state.loadUsage() } }
+        .task {
+            if state.usage == nil { await state.loadUsage() }
+            if state.advice == nil { await state.loadAdvice() }
+        }
     }
 
     private var hero: some View {
@@ -145,6 +149,94 @@ struct DashboardView: View {
                     }
                 }
             }
+        }
+    }
+}
+
+/// What Fusebox suggests changing. People read it; agents apply it.
+private struct AdviceCard: View {
+    let advice: Advice?
+    @State private var copied = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: DS.gap) {
+            HStack {
+                Text(L10n.suggestions).font(.headline)
+                if let n = advice?.suggestions.count, n > 0 {
+                    Text("\(n)").font(.headline).foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            Card {
+                if let advice {
+                    if advice.suggestions.isEmpty {
+                        Label(L10n.noSuggestions, systemImage: "checkmark.circle").foregroundStyle(.secondary)
+                    } else {
+                        ForEach(Array(advice.suggestions.enumerated()), id: \.element.id) { index, s in
+                            if index > 0 { Divider() }
+                            row(s)
+                        }
+                    }
+                } else {
+                    ProgressView().frame(maxWidth: .infinity)
+                }
+                if advice.map({ !$0.suggestions.isEmpty }) ?? false {
+                    Divider()
+                    prompt
+                }
+            }
+        }
+    }
+
+    private func row(_ s: Advice.Suggestion) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Image(systemName: symbol(s.kind)).foregroundStyle(.secondary).frame(width: 18)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(s.title).font(.body.weight(.medium))
+                    if s.needsHuman { Chip(text: L10n.needsYou, tint: DS.warn) }
+                }
+                Text(s.reason).font(.callout).foregroundStyle(.secondary).lineLimit(2)
+                if let items = s.items, !items.isEmpty {
+                    Text(items.joined(separator: " · ")).font(.caption).foregroundStyle(.tertiary).lineLimit(1)
+                }
+            }
+        }
+        .padding(.vertical, 2)
+        .help(s.commands.joined(separator: "\n"))
+    }
+
+    private var prompt: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label(L10n.askAgent, systemImage: "sparkles").font(.callout.weight(.medium))
+            Text(L10n.askAgentHint).font(.caption).foregroundStyle(.secondary)
+            HStack(spacing: DS.gap) {
+                Text(L10n.askAgentPrompt)
+                    .font(.callout)
+                    .textSelection(.enabled)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                Button(copied ? L10n.copied : L10n.copyPrompt) {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(L10n.askAgentPrompt, forType: .string)
+                    copied = true
+                    Task {
+                        try? await Task.sleep(for: .seconds(2))
+                        copied = false
+                    }
+                }
+            }
+        }
+    }
+
+    private func symbol(_ kind: String) -> String {
+        switch kind {
+        case "mcp": Page.mcp.symbol
+        case "skill": Page.skills.symbol
+        case "secret": Page.secrets.symbol
+        default: "arrow.triangle.2.circlepath"
         }
     }
 }

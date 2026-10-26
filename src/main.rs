@@ -25,7 +25,8 @@ use config::{Apps, Config, Mode, Tool};
 use paths::Paths;
 use util::{Result, json_ordered, json_pretty};
 
-const VALUE_OPTS: [&str; 17] = [
+const VALUE_OPTS: &[&str] = &[
+    "lang",
     "home",
     "user-home",
     "config",
@@ -158,7 +159,7 @@ Usage: fusebox [--home DIR] [--user-home DIR] [--config FILE] <command>
   skills status|fetch|promote|enable|disable|sync|sync-global|update
   skills usage [--days 60] [--json]     what each agent actually used
   skills prune [--days 60] [--profile global] [--apply]
-  advise [--days 60] [--json]          suggestions (with commands) for an agent to apply
+  advise [--days 60] [--lang zh] [--json]  suggestions (with commands) for an agent to apply
   run ID [ARGS...]                      start an MCP with only its secrets (used by wrappers)
   hub APP                               lazy MCP proxy (used by the agent-hub entry)
   write-default-config
@@ -754,6 +755,7 @@ fn cmd_skills_usage(ctx: &Ctx, a: &Args) -> Result<i32> {
 fn prune_plan(hub: &skills::Hub, stats: &usage::UsageStats, profile: &str) -> Result<(Vec<String>, Vec<Value>)> {
     let enabled = skills::enabled_skills(hub, profile)?;
     let keep = skills::profile_keep(hub, profile);
+    let fresh = skills::recently_enabled(hub, profile, stats.days);
     // A skill that another enabled skill names in its SKILL.md is a
     // dependency (e.g. a publisher that calls a design system), even when it
     // is never invoked directly.
@@ -767,6 +769,10 @@ fn prune_plan(hub: &skills::Hub, stats: &usage::UsageStats, profile: &str) -> Re
     for (name, skill_md) in &enabled {
         let u = stats.lookup(name, dir_name(skill_md).as_deref());
         if u.total() > 0 {
+            continue;
+        }
+        if fresh.contains(name) {
+            protected.push(json!({"name": name, "reason": "enabled recently"}));
             continue;
         }
         if keep.contains(name) {
@@ -874,7 +880,10 @@ fn suggestion(
 }
 
 fn cmd_advise(ctx: &Ctx, a: &Args) -> Result<i32> {
-    a.check(&["days", "json"])?;
+    a.check(&["days", "json", "lang"])?;
+    // Titles and reasons follow the reader's language; commands never change.
+    let zh = a.one("lang") == Some("zh");
+    let tr = |en: String, cn: String| if zh { cn } else { en };
     let config = ctx.config()?;
     let report = doctor::run(&config, &ctx.paths)?;
     let stats = usage::collect(&ctx.paths, days(a)?)?;
@@ -886,17 +895,21 @@ fn cmd_advise(ctx: &Ctx, a: &Args) -> Result<i32> {
         out.push(suggestion(
             "sync.blocked".into(),
             "sync",
-            "Fix what blocks sync".into(),
+            tr("Fix what blocks sync".into(), "先解决阻止同步的问题".into()),
             msgs.join("; "),
             vec![],
             true,
         ));
     } else if !report.changes.is_empty() {
+        let n = report.changes.len();
         out.push(suggestion(
             "sync".into(),
             "sync",
-            format!("Sync {} pending change(s) to the agents", report.changes.len()),
-            "Agent configs or instructions differ from the Fusebox config.".into(),
+            tr(format!("Sync {n} pending change(s) to the agents"), format!("把 {n} 处改动同步到各个 Agent")),
+            tr(
+                "Agent configs or instructions differ from the Fusebox config.".into(),
+                "各 Agent 的配置或说明和 Fusebox 里的不一致。".into(),
+            ),
             vec!["fusebox reconcile".into()],
             false,
         ));
@@ -911,8 +924,11 @@ fn cmd_advise(ctx: &Ctx, a: &Args) -> Result<i32> {
         out.push(suggestion(
             format!("secret.{name}"),
             "secret",
-            format!("Add the missing secret {name}"),
-            format!("Needed by {}; only the user can provide the value.", users.join(", ")),
+            tr(format!("Add the missing secret {name}"), format!("补上缺失的密钥 {name}")),
+            tr(
+                format!("Needed by {}; only the user can provide the value.", users.join(", ")),
+                format!("{} 需要它；值只能由你提供。", users.join("、")),
+            ),
             vec![format!("fusebox secret set --stdin {name}   # value via stdin, never as an argument")],
             true,
         ));
@@ -949,20 +965,32 @@ fn cmd_advise(ctx: &Ctx, a: &Args) -> Result<i32> {
         let rename_note = if pinned.is_empty() {
             String::new()
         } else {
-            format!(
-                " Skills that name its tools directly ({}) must switch to mcp__agent-hub__{}__<tool>.",
-                pinned.join(", "),
-                hub_short(&tool.id)
+            let short = hub_short(&tool.id);
+            tr(
+                format!(
+                    " Skills that name its tools directly ({}) must switch to mcp__agent-hub__{short}__<tool>.",
+                    pinned.join(", ")
+                ),
+                format!(" 直接写了它工具名的 Skill（{}）要改成 mcp__agent-hub__{short}__<工具名>。", pinned.join("、")),
             )
         };
+        let name = &tool.name;
+        let pct = share * 100.0;
+        let used = u.total();
         match tool.mode {
             Mode::Direct if available > 0 && u.total() == 0 => out.push(suggestion(
                 format!("mcp.{}.idle", tool.id),
                 "mcp",
-                format!("{} was never used in {} days", tool.name, stats.days),
-                format!(
-                    "It starts with every session ({available} sessions) but no tool call was seen.{} Switch it to on demand, or turn it off.{rename_note}",
-                    if untracked { " Hermes/Claude Desktop usage is not tracked." } else { "" }
+                tr(format!("{name} was never used in {} days", stats.days), format!("{name} {} 天里一次都没用过", stats.days)),
+                tr(
+                    format!(
+                        "It starts with every session ({available} sessions) but no tool call was seen.{} Switch it to on demand, or turn it off.{rename_note}",
+                        if untracked { " Hermes/Claude Desktop usage is not tracked." } else { "" }
+                    ),
+                    format!(
+                        "每个会话都会启动它（共 {available} 个），但从没调用过它的工具。{}建议改成按需，或者关掉。{rename_note}",
+                        if untracked { "Hermes / Claude Desktop 里的使用统计不到。" } else { "" }
+                    ),
                 ),
                 vec![format!("fusebox mcp hub {}", tool.id), "fusebox reconcile".into()],
                 false,
@@ -970,11 +998,14 @@ fn cmd_advise(ctx: &Ctx, a: &Args) -> Result<i32> {
             Mode::Direct if available >= 10 && share < 0.2 => out.push(suggestion(
                 format!("mcp.{}.hub", tool.id),
                 "mcp",
-                format!("Serve {} on demand", tool.name),
-                format!(
-                    "Used in {} of {available} sessions ({:.0}%); starting it only when needed saves a process per session.{rename_note}",
-                    u.total(),
-                    share * 100.0
+                tr(format!("Serve {name} on demand"), format!("把 {name} 改成按需启动")),
+                tr(
+                    format!(
+                        "Used in {used} of {available} sessions ({pct:.0}%); starting it only when needed saves a process per session.{rename_note}"
+                    ),
+                    format!(
+                        "{available} 个会话里只用到 {used} 次（{pct:.0}%）；用到时再启动，每个会话能省一个后台进程。{rename_note}"
+                    ),
                 ),
                 vec![format!("fusebox mcp hub {}", tool.id), "fusebox reconcile".into()],
                 false,
@@ -982,8 +1013,11 @@ fn cmd_advise(ctx: &Ctx, a: &Args) -> Result<i32> {
             Mode::Hub if available >= 10 && share > 0.5 => out.push(suggestion(
                 format!("mcp.{}.direct", tool.id),
                 "mcp",
-                format!("Keep {} always on", tool.name),
-                format!("Used in {:.0}% of sessions; a cold start on almost every session costs more than keeping it.", share * 100.0),
+                tr(format!("Keep {name} always on"), format!("把 {name} 改回常驻")),
+                tr(
+                    format!("Used in {pct:.0}% of sessions; a cold start on almost every session costs more than keeping it."),
+                    format!("{pct:.0}% 的会话都会用到它；几乎每次都要冷启动，不如一直开着。"),
+                ),
                 vec![format!("fusebox mcp direct {}", tool.id), "fusebox reconcile".into()],
                 false,
             )),
@@ -1000,16 +1034,38 @@ fn cmd_advise(ctx: &Ctx, a: &Args) -> Result<i32> {
             }
             let kept: Vec<String> = protected
                 .iter()
-                .map(|p| format!("{} ({})", p["name"].as_str().unwrap_or(""), p["reason"].as_str().unwrap_or("")))
+                .map(|p| {
+                    let reason = p["reason"].as_str().unwrap_or("");
+                    let reason = if !zh {
+                        reason.to_string()
+                    } else if let Some(users) = reason.strip_prefix("used by ") {
+                        format!("{users} 用到它")
+                    } else if reason == "enabled recently" {
+                        "刚启用".into()
+                    } else {
+                        "在保留名单里".into()
+                    };
+                    format!("{} ({reason})", p["name"].as_str().unwrap_or(""))
+                })
                 .collect();
             let mut s = suggestion(
                 format!("skills.prune.{profile}"),
                 "skill",
-                format!("Turn off {} unused skill(s) in profile {profile}", candidates.len()),
-                format!(
-                    "No Claude Code, Codex or DeepSeek Harness session used them in {} days. Files stay on disk.{}",
-                    stats.days,
-                    if kept.is_empty() { String::new() } else { format!(" Kept: {}.", kept.join("; ")) }
+                tr(
+                    format!("Turn off {} unused skill(s) in profile {profile}", candidates.len()),
+                    format!("停用 {profile} 里 {} 个没用过的 Skill", candidates.len()),
+                ),
+                tr(
+                    format!(
+                        "No Claude Code, Codex or DeepSeek Harness session used them in {} days. Files stay on disk.{}",
+                        stats.days,
+                        if kept.is_empty() { String::new() } else { format!(" Kept: {}.", kept.join("; ")) }
+                    ),
+                    format!(
+                        "最近 {} 天 Claude Code、Codex、DeepSeek Harness 都没用过。停用后文件还在。{}",
+                        stats.days,
+                        if kept.is_empty() { String::new() } else { format!("保留：{}。", kept.join("；")) }
+                    ),
                 ),
                 vec![format!("fusebox skills prune --profile {profile} --days {} --apply", stats.days)],
                 false,
@@ -1030,7 +1086,11 @@ fn cmd_advise(ctx: &Ctx, a: &Args) -> Result<i32> {
         return Ok(0);
     }
     if out.is_empty() {
-        print("Nothing to suggest: everything is synced and in use.\n");
+        print(if zh {
+            "没有需要调整的，一切都在正常使用。\n"
+        } else {
+            "Nothing to suggest: everything is synced and in use.\n"
+        });
         return Ok(0);
     }
     for (i, s) in out.iter().enumerate() {

@@ -86,7 +86,7 @@ extension MCPMode {
 
     var color: Color {
         switch self {
-        case .off: Color.secondary.opacity(0.5)
+        case .off: Color.gray
         case .direct: DS.good
         case .hub: DS.hub
         }
@@ -136,6 +136,7 @@ private struct MCPRow: View {
             if let n = server.toolCount {
                 Text("\(n) \(L10n.tools)").font(.caption).foregroundStyle(.tertiary).monospacedDigit()
             }
+            Circle().fill(mode.color).frame(width: 8, height: 8)
             Menu {
                 Picker(L10n.apps, selection: Binding(get: { mode }, set: { next in
                     Task { await state.setMode(server, next) }
@@ -146,14 +147,11 @@ private struct MCPRow: View {
                 }
                 .pickerStyle(.inline)
             } label: {
-                HStack(spacing: 6) {
-                    Circle().fill(mode.color).frame(width: 7, height: 7)
-                    Text(mode.title).font(.callout)
-                }
+                Text(mode.title).font(.callout)
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
-            .frame(minWidth: 96, alignment: .trailing)
+            .frame(minWidth: 72, alignment: .leading)
             .disabled(state.syncing)
         }
         .padding(.vertical, 5)

@@ -16,6 +16,7 @@ struct ContentView: View {
         } detail: {
             detail
                 .toolbar {
+                    ToolbarItem(placement: .primaryAction) { LanguageMenu() }
                     ToolbarItemGroup(placement: .primaryAction) {
                         Button {
                             Task { await state.refresh() }
@@ -35,6 +36,7 @@ struct ContentView: View {
         }
         .id(language)
         .task { await state.refresh() }
+        .onChange(of: language) { Task { await state.loadAdvice() } }
         .alert(
             L10n.t("Something went wrong", "出错了"),
             isPresented: Binding(get: { state.error != nil }, set: { if !$0 { state.error = nil } })

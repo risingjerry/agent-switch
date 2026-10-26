@@ -44,7 +44,7 @@ struct SkillsView: View {
             VStack(alignment: .leading, spacing: 2) {
                 if let usage = state.usage {
                     Text(L10n.unusedSummary(unused, rows.count, usage.days)).font(.headline)
-                    Text(L10n.sessions(usage.sessions["claude"] ?? 0, usage.sessions["codex"] ?? 0))
+                    Text(L10n.sessions(usage.sessions["claude"] ?? 0, usage.sessions["codex"] ?? 0, usage.sessions["deepseek"] ?? 0))
                         .font(.callout).foregroundStyle(.secondary)
                 } else {
                     Text(L10n.checking).font(.headline)
@@ -79,6 +79,8 @@ struct SkillsView: View {
             TableColumn("Claude Code", value: \.claude) { row in UsageBar(value: row.claude, tint: .orange) }
                 .width(min: 90, ideal: 110)
             TableColumn("Codex", value: \.codex) { row in UsageBar(value: row.codex, tint: .blue) }
+                .width(min: 90, ideal: 110)
+            TableColumn("DeepSeek", value: \.ds) { row in UsageBar(value: row.ds, tint: .indigo) }
                 .width(min: 90, ideal: 110)
             TableColumn(L10n.lastUsed, value: \.lastUsed) { row in
                 Text(row.lastUsed == "-" ? L10n.never : row.lastUsed).foregroundStyle(.secondary).monospacedDigit()

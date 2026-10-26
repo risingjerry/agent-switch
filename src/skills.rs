@@ -454,6 +454,8 @@ pub fn enable(hub: &Hub, profile_name: &str, name: &str, source: &str, path: Opt
     entry.insert("name".into(), json!(name));
     entry.insert("source".into(), json!(source));
     entry.insert("path".into(), json!(path));
+    // Recorded so `prune` gives a newly enabled skill time to be used.
+    entry.insert("enabledAt".into(), json!(&now_iso()[..10]));
     items.push(entry);
     items.sort_by_key(entry_name);
     profile.insert("skills".into(), Value::Array(items.into_iter().map(Value::Object).collect()));
@@ -709,6 +711,20 @@ pub fn enabled_skills(hub: &Hub, profile_name: &str) -> Result<Vec<(String, Path
     profile_skills(&profile)
         .iter()
         .map(|i| Ok((entry_name(i), hub.skill_dir(s(i.get("source")).unwrap_or(""), &entry_path(i))?.join("SKILL.md"))))
+        .collect()
+}
+
+/// Skills enabled within the last `days` days (by their `enabledAt` date):
+/// too new to judge by usage.
+pub fn recently_enabled(hub: &Hub, profile_name: &str, days: u64) -> BTreeSet<String> {
+    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let cutoff = now_iso_at(secs.saturating_sub(days * 86_400))[..10].to_string();
+    hub.profile(profile_name)
+        .map(|p| profile_skills(&p))
+        .unwrap_or_default()
+        .iter()
+        .filter(|i| s(i.get("enabledAt")).is_some_and(|d| d > cutoff.as_str()))
+        .map(entry_name)
         .collect()
 }
 

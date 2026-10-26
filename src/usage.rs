@@ -20,7 +20,7 @@ use serde_json::{Map, Value, json};
 use crate::paths::Paths;
 use crate::util::{Result, write_if_changed};
 
-const CACHE_VERSION: u64 = 2;
+const CACHE_VERSION: u64 = 3;
 
 static SKILL_MD_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"([A-Za-z0-9_.:-]+)/SKILL\.md").unwrap());
 static CLAUDE_SKILL_RE: LazyLock<Regex> =
@@ -160,10 +160,13 @@ fn read_log(path: &Path) -> std::io::Result<Vec<u8>> {
     let raw = fs::read(path)?;
     if path.extension().is_some_and(|x| x == "zstd") {
         use std::io::Read;
+        // dsh appends one zstd frame per write; decode every frame.
         let mut out = Vec::new();
-        ruzstd::decoding::StreamingDecoder::new(raw.as_slice())
-            .map_err(std::io::Error::other)?
-            .read_to_end(&mut out)?;
+        let mut input: &[u8] = &raw;
+        while !input.is_empty() {
+            let mut frame = ruzstd::decoding::StreamingDecoder::new(&mut input).map_err(std::io::Error::other)?;
+            frame.read_to_end(&mut out)?;
+        }
         return Ok(out);
     }
     Ok(raw)

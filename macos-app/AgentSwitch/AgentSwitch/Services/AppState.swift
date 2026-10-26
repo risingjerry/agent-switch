@@ -16,6 +16,7 @@ final class AppState {
     var mcps: [MCPServer] = []
     var skills: SkillReport?
     var usage: SkillUsage?
+    var advice: Advice?
     var secretNames: [String] = []
     var clis: [CLIInfo] = []
 
@@ -47,12 +48,17 @@ final class AppState {
         self.mcps = await mcps ?? self.mcps
         self.skills = await skills ?? self.skills
         self.secretNames = await secrets ?? self.secretNames
+        if advice != nil { await loadAdvice() }
     }
 
     func loadUsage() async {
         loadingUsage = true
         defer { loadingUsage = false }
         usage = await attempt { try await self.service.usage(days: self.usageDays) } ?? usage
+    }
+
+    func loadAdvice() async {
+        advice = await attempt { try await self.service.advise(days: self.usageDays) } ?? advice
     }
 
     func loadCLIs() async {

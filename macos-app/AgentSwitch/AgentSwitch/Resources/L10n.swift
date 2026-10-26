@@ -88,9 +88,24 @@ enum L10n {
         t("\(unused) of \(total) enabled skills were not used in the last \(days) days",
           "最近 \(days) 天，\(total) 个已启用的 Skill 里有 \(unused) 个没用过")
     }
-    static func sessions(_ claude: Int, _ codex: Int) -> String {
-        t("from \(claude) Claude Code and \(codex) Codex sessions", "统计自 \(claude) 个 Claude Code 会话和 \(codex) 个 Codex 会话")
+    static func sessions(_ claude: Int, _ codex: Int, _ deepseek: Int) -> String {
+        t("from \(claude) Claude Code, \(codex) Codex and \(deepseek) DeepSeek Harness sessions",
+          "统计自 \(claude) 个 Claude Code、\(codex) 个 Codex、\(deepseek) 个 DeepSeek Harness 会话")
     }
+    static var suggestions: String { t("Suggestions", "建议") }
+    static var askAgent: String { t("Let your agent handle it", "交给 Agent 处理") }
+    static var askAgentHint: String {
+        t("Fusebox is built for agents to operate. Paste this into Claude Code, Codex or DeepSeek Harness:",
+          "这些改动交给 Agent 来做。把下面这句话发给 Claude Code、Codex 或 DeepSeek Harness：")
+    }
+    static var askAgentPrompt: String {
+        t("Check Fusebox (fusebox advise) and tell me what you suggest changing — apply only what I approve.",
+          "看看 Fusebox（运行 fusebox advise），告诉我你建议改哪些，我同意的再帮我执行。")
+    }
+    static var copied: String { t("Copied", "已复制") }
+    static var copyPrompt: String { t("Copy", "复制") }
+    static var noSuggestions: String { t("Nothing to change — everything is synced and in use.", "没有需要调整的，一切都在正常使用。") }
+    static var needsYou: String { t("needs you", "需要你来") }
     static var cleanupTitle: String { t("Turn off unused skills", "停用没用过的 Skill") }
     static var cleanupHint: String { t(
         "Turned-off skills stay on disk and can be turned back on anytime.",

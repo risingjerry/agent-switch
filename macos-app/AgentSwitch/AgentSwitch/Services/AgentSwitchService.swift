@@ -40,6 +40,10 @@ actor AgentSwitchService {
         try await decode(["skills", "usage", "--days", String(days), "--json"])
     }
 
+    func advise(days: Int) async throws -> Advice {
+        try await decode(["advise", "--days", String(days), "--lang", L10n.chinese ? "zh" : "en", "--json"])
+    }
+
     func prunePlan(profile: String, days: Int) async throws -> PrunePlan {
         try await decode(["skills", "prune", "--profile", profile, "--days", String(days), "--json"])
     }
