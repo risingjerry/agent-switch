@@ -206,13 +206,26 @@ struct State {
 impl State {
     fn hub_tools(&self) -> Vec<Tool> {
         let config = self.config.lock().unwrap();
-        config.tools.iter().filter(|t| t.enabled && t.mode == Mode::Hub && t.apps.get(&self.app)).cloned().collect()
+        // On-demand servers cost nothing until used, so every agent can reach
+        // all of them; the per-app flags only scope resident servers.
+        let _ = &self.app;
+        config.tools.iter().filter(|t| t.enabled && t.mode == Mode::Hub).cloned().collect()
+    }
+
+    /// Claude Code and Codex defer tool definitions until used, so cached
+    /// tools can be listed for them at no cost; other hosts would load every
+    /// definition up front, so they only get the two Fusebox tools.
+    fn defers_tool_definitions(&self) -> bool {
+        matches!(self.app.as_str(), "claude" | "codex")
     }
 
     fn list(&self) -> Vec<Value> {
         let mut out = Vec::new();
         if !self.hub_tools().is_empty() {
             out.extend(meta_tools());
+        }
+        if !self.defers_tool_definitions() {
+            return out;
         }
         for tool in self.hub_tools() {
             let Some(manifest) = load_manifest(&self.paths, &tool.id) else { continue };
@@ -237,15 +250,13 @@ impl State {
              to start one and get its tools), then fusebox_call to use a tool."
                 .to_string(),
         ];
+        // One line per server; a server's own instructions come back from
+        // fusebox_servers when it is started, not in every session.
         for tool in self.hub_tools() {
-            if let Some(text) =
-                load_manifest(&self.paths, &tool.id).and_then(|m| m["instructions"].as_str().map(String::from))
-                && !text.trim().is_empty()
-            {
-                parts.push(format!("## {}\n{}", tool.name, text.trim()));
-            }
+            let desc: String = tool.description.as_str().unwrap_or("").chars().take(120).collect();
+            parts.push(format!("- {}: {} {desc}", short_id(&tool), tool.name));
         }
-        parts.join("\n\n")
+        parts.join("\n")
     }
 
     fn notify_list_changed(&self) {
@@ -311,8 +322,8 @@ impl State {
             self.backend(&tool)?.touch();
             let manifest = load_manifest(&self.paths, &tool.id).unwrap_or(Value::Null);
             let tools = manifest["tools"].clone();
-            let text = json!({"server": short_id(&tool), "name": tool.name, "tools": tools,
-                "usage": "call tools with fusebox_call {server, tool, arguments}"});
+            let text = json!({"server": short_id(&tool), "name": tool.name, "instructions": manifest["instructions"],
+                "tools": tools, "usage": "call tools with fusebox_call {server, tool, arguments}"});
             return Ok(json!({"content": [{"type": "text", "text": text.to_string()}]}));
         }
         let list: Vec<Value> = self
@@ -406,6 +417,10 @@ impl State {
             }
         });
     }
+}
+
+pub fn cached_manifest(paths: &Paths, id: &str) -> Option<Value> {
+    load_manifest(paths, id)
 }
 
 /// Number of tools in the cached manifest, if the tool has ever run under

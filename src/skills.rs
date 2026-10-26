@@ -600,7 +600,22 @@ pub fn status_lines(hub: &Hub, agent_home: &Path) -> Vec<String> {
     lines
 }
 
-const SKIP_DIRS: [&str; 6] = [".git", ".hg", ".svn", "node_modules", "__pycache__", "archives"];
+/// Version control, dependencies, and sample/test trees that contain
+/// SKILL.md files which are not real skills (fixtures, examples).
+const SKIP_DIRS: [&str; 12] = [
+    ".git",
+    ".hg",
+    ".svn",
+    "node_modules",
+    "__pycache__",
+    "archives",
+    "tests",
+    "test",
+    "fixtures",
+    "examples",
+    "templates",
+    "evals",
+];
 
 fn discover_paths(root: &Path) -> BTreeSet<String> {
     fn walk(root: &Path, dir: &Path, out: &mut BTreeSet<String>) {
@@ -867,6 +882,82 @@ fn terms(text: &str) -> Vec<String> {
     out.sort();
     out.dedup();
     out
+}
+
+/// BM25 over two fields (name weighted 3x, description/text 1x) for one
+/// catalog of Skills and MCP servers. Tokens: ASCII words split on
+/// separators, plus CJK character bigrams.
+pub struct Bm25 {
+    docs: Vec<(Vec<String>, Vec<String>)>,
+    df: BTreeMap<String, usize>,
+    avg_name: f64,
+    avg_text: f64,
+}
+
+fn tokens(text: &str) -> Vec<String> {
+    let lower = text.to_lowercase();
+    let mut out: Vec<String> =
+        lower.split(|c: char| !c.is_ascii_alphanumeric()).filter(|w| w.len() >= 2).map(String::from).collect();
+    let mut run: Vec<char> = Vec::new();
+    let flush = |run: &mut Vec<char>, out: &mut Vec<String>| {
+        if run.len() == 1 {
+            out.push(run[0].to_string());
+        }
+        out.extend(run.windows(2).map(|w| w.iter().collect::<String>()));
+        run.clear();
+    };
+    for c in lower.chars() {
+        if c as u32 >= 0x2E80 && !c.is_ascii() && c.is_alphabetic() {
+            run.push(c);
+        } else {
+            flush(&mut run, &mut out);
+        }
+    }
+    flush(&mut run, &mut out);
+    out
+}
+
+impl Bm25 {
+    pub fn new(docs: &[(String, String)]) -> Bm25 {
+        let docs: Vec<(Vec<String>, Vec<String>)> = docs.iter().map(|(n, t)| (tokens(n), tokens(t))).collect();
+        let mut df = BTreeMap::new();
+        for (n, t) in &docs {
+            let uniq: BTreeSet<&String> = n.iter().chain(t.iter()).collect();
+            for term in uniq {
+                *df.entry(term.clone()).or_insert(0) += 1;
+            }
+        }
+        let count = docs.len().max(1) as f64;
+        let avg_name = docs.iter().map(|d| d.0.len()).sum::<usize>() as f64 / count;
+        let avg_text = docs.iter().map(|d| d.1.len()).sum::<usize>() as f64 / count;
+        Bm25 { docs, df, avg_name: avg_name.max(1.0), avg_text: avg_text.max(1.0) }
+    }
+
+    pub fn score(&self, doc: usize, query: &str) -> f64 {
+        let (k1, b) = (1.2, 0.75);
+        let n = self.docs.len() as f64;
+        let (name, text) = &self.docs[doc];
+        let field = |terms: &[String], avg: f64, q: &str| -> f64 {
+            let tf = terms.iter().filter(|t| t.as_str() == q).count() as f64;
+            if tf == 0.0 {
+                return 0.0;
+            }
+            tf * (k1 + 1.0) / (tf + k1 * (1.0 - b + b * terms.len() as f64 / avg))
+        };
+        let mut q: Vec<String> = tokens(query);
+        q.sort();
+        q.dedup();
+        q.iter()
+            .map(|t| {
+                let df = *self.df.get(t).unwrap_or(&0) as f64;
+                if df == 0.0 {
+                    return 0.0;
+                }
+                let idf = ((n - df + 0.5) / (df + 0.5) + 1.0).ln();
+                idf * (3.0 * field(name, self.avg_name, t) + field(text, self.avg_text, t))
+            })
+            .sum()
+    }
 }
 
 /// Ranked matches for a task description. Name hits weigh more than

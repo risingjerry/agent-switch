@@ -18,7 +18,9 @@ pub const HUB_ID: &str = "agent-hub";
 
 pub fn detected_apps(paths: &Paths) -> Vec<&'static str> {
     let real = paths.targets_real_user();
-    let cmd = |c: &str| real && which(c).is_some();
+    // Terminal wrappers (e.g. cmux) put same-named shims on PATH; a shim is
+    // not an installed agent.
+    let cmd = |c: &str| real && which(c).is_some_and(|p| !p.to_string_lossy().contains("-shims/"));
     let mut out = Vec::new();
     let codex_dir = paths.codex_config.parent().unwrap();
     if codex_dir.exists() || paths.codex_config.exists() || cmd("codex") {
@@ -99,16 +101,12 @@ pub fn wrappers(config: &Config, paths: &Paths) -> Vec<Wrapper> {
 
 pub fn desired_for_app(config: &Config, app: &str, paths: &Paths) -> Desired {
     let mut desired = Desired::new();
-    let mut hub = false;
-    for tool in config.tools_for_app(app) {
-        match tool.mode {
-            Mode::Direct => {
-                let command = paths.wrapper_dir.join(tool.wrapper_name()).to_string_lossy().into_owned();
-                desired.insert(tool.id.clone(), Spec { command, args: vec![] });
-            }
-            Mode::Hub => hub = true,
-        }
+    for tool in config.tools_for_app(app).into_iter().filter(|t| t.mode == Mode::Direct) {
+        let command = paths.wrapper_dir.join(tool.wrapper_name()).to_string_lossy().into_owned();
+        desired.insert(tool.id.clone(), Spec { command, args: vec![] });
     }
+    // Every agent gets the hub when any server is on demand.
+    let hub = config.tools.iter().any(|t| t.enabled && t.mode == Mode::Hub);
     if hub {
         let command = paths.wrapper_dir.join("mcp-hub").to_string_lossy().into_owned();
         desired.insert(HUB_ID.into(), Spec { command, args: vec![app.to_string()] });
@@ -212,6 +210,15 @@ fn targets() -> [Target; 5] {
     ]
 }
 
+/// Claude Code skill projection, when a Skill Hub exists.
+pub fn claude_plan(config: &Config, paths: &Paths) -> Option<crate::claude::Plan> {
+    let hub_root = config.skill_hub.clone().unwrap_or_else(|| instructions::skill_hub_dir(paths));
+    if !hub_root.join("config").join("registry.json").exists() {
+        return None;
+    }
+    crate::claude::plan(paths, &hub_root, &self_binary()).ok()
+}
+
 pub fn run(config: &Config, paths: &Paths) -> Result<Report> {
     let mut findings = Vec::new();
     let mut changes = Vec::new();
@@ -263,6 +270,18 @@ pub fn run(config: &Config, paths: &Paths) -> Result<Report> {
                 path: Some(path),
                 detail: format!("{target} managed instructions differ"),
                 target: target.into(),
+            });
+        }
+    }
+    if apps.contains(&"claude")
+        && let Some(plan) = claude_plan(config, paths)
+    {
+        for detail in crate::claude::diff(&plan)? {
+            changes.push(Change {
+                target: "claude.skills".into(),
+                path: Some(plan.skills_dir.clone()),
+                action: "update",
+                detail,
             });
         }
     }
@@ -359,6 +378,12 @@ pub fn apply(config: &Config, paths: &Paths) -> Result<(ApplySummary, Report)> {
         }
         let rendered = renderer(&current, &desired, paths)?;
         count(write_if_changed(path, &rendered, None, Some(&paths.backup_dir))?.changed);
+    }
+    if apps.contains(&"claude")
+        && let Some(plan) = claude_plan(config, paths)
+    {
+        let n = crate::claude::apply(&plan, &paths.backup_dir)?;
+        summary.changed += n;
     }
     let post = run(config, paths)?;
     Ok((summary, post))

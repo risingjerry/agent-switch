@@ -56,8 +56,51 @@ Skills (sources in `{hub}`):
     )
 }
 
+/// Names of everything on demand, for hosts without a native name-only
+/// skill listing (Codex, Hermes, DeepSeek Harness). Names alone pick as
+/// well as full descriptions at a fraction of the context.
+fn catalog_index(paths: &Paths) -> String {
+    let resident: Vec<String> = crate::skills::Hub::load(&skill_hub_dir(paths))
+        .and_then(|h| crate::skills::enabled_skills(&h, "global"))
+        .map(|v| v.into_iter().map(|(n, _)| n).collect())
+        .unwrap_or_default();
+    let mut names: Vec<String> = crate::skills::catalog(&skill_hub_dir(paths))
+        .unwrap_or_default()
+        .into_iter()
+        .map(|e| e.name)
+        .filter(|n| !resident.contains(n))
+        .collect();
+    names.sort();
+    names.dedup();
+    let servers: Vec<String> = crate::config::load(&paths.config_file, &paths.secrets_file)
+        .map(|c| {
+            c.tools
+                .iter()
+                .filter(|t| t.enabled && t.mode == crate::config::Mode::Hub)
+                .map(|t| t.id.trim_start_matches("agent-").replace('-', "_"))
+                .collect()
+        })
+        .unwrap_or_default();
+    if names.is_empty() && servers.is_empty() {
+        return String::new();
+    }
+    let mut out = String::from("\nOn-demand catalog (names only — load what fits the task):\n");
+    if !names.is_empty() {
+        out.push_str(&format!("- Skills (`fusebox skills show NAME`): {}\n", names.join(", ")));
+    }
+    if !servers.is_empty() {
+        out.push_str(&format!(
+            "- MCP servers (agent-hub `fusebox_servers` / `fusebox_call`): {}\n",
+            servers.join(", ")
+        ));
+    }
+    out.push_str("- Unsure which? `fusebox find WORDS` (English or Chinese) ranks both.\n");
+    out
+}
+
 pub fn codex(paths: &Paths) -> String {
     core_policy(paths)
+        + &catalog_index(paths)
         + "
 Codex-specific rule:
 - This file is loaded from `model_instructions_file`; every new Codex session should follow it.
@@ -74,6 +117,7 @@ Claude-specific rule:
 
 pub fn hermes(paths: &Paths) -> String {
     core_policy(paths)
+        + &catalog_index(paths)
         + "
 Hermes-specific rule:
 - Hermes provider switching may be handled elsewhere, but MCP credentials and tool secrets remain managed by Fusebox.
@@ -82,6 +126,7 @@ Hermes-specific rule:
 
 pub fn deepseek(paths: &Paths) -> String {
     core_policy(paths)
+        + &catalog_index(paths)
         + "
 DeepSeek Harness-specific rule:
 - MCP servers reach dsh through the Fusebox block in `~/.dsh/cordis.patch.yml`; do not edit that block by hand, use `fusebox mcp ...` and `fusebox reconcile`.

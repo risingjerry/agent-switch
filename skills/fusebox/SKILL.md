@@ -7,7 +7,13 @@ description: Manage this machine's agent setup through the local `fusebox` CLI â
 
 Fusebox is the single place this machine keeps agent secrets, MCP servers and Skills. The user watches it in the Fusebox app; **you** make the changes, through the CLI, after the user agrees.
 
+## Find what you need (do this before saying a capability is missing)
+
+`fusebox find WORDS` ranks every Skill and MCP server for a task (English or Chinese; describe the capability, not the user's exact words). Each hit says how to load it.
+
 ## Two states, nothing is ever "off"
+
+Everything is **on demand** unless the user explicitly asked for it to be resident.
 
 - **Resident**: loaded into every session (globally, or only in one project). For a Skill: in your skill list. For an MCP: started with the session.
 - **On demand**: costs nothing until needed, but always reachable.

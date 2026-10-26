@@ -1,6 +1,7 @@
 //! fusebox: one lightweight control plane for agent secrets, MCP servers,
 //! CLIs and Skills.
 
+mod claude;
 mod config;
 mod doctor;
 mod hub;
@@ -26,6 +27,7 @@ use paths::Paths;
 use util::{Result, json_ordered, json_pretty};
 
 const VALUE_OPTS: &[&str] = &[
+    "cwd",
     "lang",
     "limit",
     "home",
@@ -160,6 +162,7 @@ Usage: fusebox [--home DIR] [--user-home DIR] [--config FILE] <command>
   skills status|fetch|promote|enable|disable|sync|sync-global|update
   skills usage [--days 60] [--json]     what each agent actually used
   skills prune [--days 60] [--profile global] [--apply]
+  find WORDS [--json]                  one catalog: on-demand Skills and MCP servers for a task
   advise [--days 60] [--lang zh] [--json]  suggestions (with commands) for an agent to apply
   run ID [ARGS...]                      start an MCP with only its secrets (used by wrappers)
   hub APP                               lazy MCP proxy (used by the agent-hub entry)
@@ -235,6 +238,8 @@ fn dispatch(argv: &[String]) -> Result<i32> {
         }
         "mcp" => cmd_mcp(&ctx, &rest),
         "advise" => cmd_advise(&ctx, &rest),
+        "find" => cmd_find(&ctx, &rest),
+        "hook" => cmd_hook(&ctx, &rest),
         "secret" => cmd_secret(&ctx, &rest),
         "skills" => cmd_skills(&ctx, &rest),
         "hub" => {
@@ -329,7 +334,8 @@ fn tool_from_args(a: &Args, existing: Option<&Tool>) -> Result<Tool> {
         env: parse_env(&a.many("env"))?,
         description: a.one("description").map_or(Value::Null, |d| json!(d)),
         enabled: !a.flag("disabled"),
-        mode: existing.map_or(Mode::Direct, |t| t.mode),
+        // New servers start on demand unless asked to be resident.
+        mode: if a.flag("resident") { Mode::Direct } else { existing.map_or(Mode::Hub, |t| t.mode) },
         idle_seconds: existing.and_then(|t| t.idle_seconds),
         id,
     })
@@ -370,7 +376,18 @@ fn cmd_mcp(ctx: &Ctx, a: &Args) -> Result<i32> {
             Ok(0)
         }
         "add" | "set" => {
-            a.check(&["name", "command", "arg", "secret", "env", "app", "description", "disabled", "json"])?;
+            a.check(&[
+                "name",
+                "command",
+                "arg",
+                "secret",
+                "env",
+                "app",
+                "description",
+                "disabled",
+                "json",
+                "resident",
+            ])?;
             let require_new = sub == "add";
             let current = ctx.config()?;
             let id = config::normalize_tool_id(a.pos(1, "MCP id")?)?;
@@ -1348,5 +1365,242 @@ fn cmd_advise(ctx: &Ctx, a: &Args) -> Result<i32> {
             print(&format!("   $ {}\n", c.as_str().unwrap_or("")));
         }
     }
+    Ok(0)
+}
+
+// ---- find: one catalog for Skills and MCP servers ----
+
+/// Git root (or the directory itself) for attributing past use to "this project".
+fn project_root(dir: &std::path::Path) -> PathBuf {
+    let mut cur = Some(dir);
+    while let Some(d) = cur {
+        if d.join(".git").exists() {
+            return d.to_path_buf();
+        }
+        cur = d.parent();
+    }
+    dir.to_path_buf()
+}
+
+/// Chinese ↔ English terms people use interchangeably for the same tool;
+/// the query is widened with the other side so either language matches.
+const SYNONYMS: &[(&str, &str)] = &[
+    ("手机", "iphone phone mobile"),
+    ("截图", "screenshot screen"),
+    ("屏幕", "screen"),
+    ("点击", "tap click"),
+    ("画图", "diagram draw canvas"),
+    ("图表", "chart diagram"),
+    ("生图", "image generate"),
+    ("配图", "image illustration"),
+    ("图片", "image"),
+    ("公众号", "wechat official account"),
+    ("微信", "wechat"),
+    ("小红书", "xiaohongshu xhs"),
+    ("抖音", "douyin"),
+    ("推特", "twitter x"),
+    ("飞书", "lark feishu"),
+    ("邮件", "email mail"),
+    ("邮箱", "email mail"),
+    ("部署", "deploy release"),
+    ("上线", "deploy release"),
+    ("发布", "publish release"),
+    ("搜索", "search"),
+    ("调研", "research"),
+    ("视频", "video"),
+    ("剪辑", "edit video jianying"),
+    ("剪映", "jianying"),
+    ("逆向", "reverse engineer"),
+    ("反编译", "decompile reverse"),
+    ("翻译", "translate"),
+    ("文章", "article"),
+    ("写作", "writing"),
+    ("退款", "refund"),
+    ("充值", "topup recharge"),
+    ("对账", "reconciliation"),
+    ("价格", "price pricing"),
+    ("公告", "announcement"),
+    ("通知", "notify notification"),
+    ("测试", "test"),
+    ("代码审查", "code review"),
+    ("提交", "commit"),
+    ("设计", "design"),
+    ("前端", "frontend ui"),
+    ("清理", "cleanup clean"),
+    ("磁盘", "disk"),
+    ("密钥", "secret key"),
+    ("支付宝", "alipay"),
+    ("转写", "transcribe transcript"),
+    ("录音", "audio recording"),
+];
+
+fn widen_query(query: &str) -> String {
+    let lower = query.to_lowercase();
+    let mut out = query.to_string();
+    for (zh, en) in SYNONYMS {
+        if query.contains(zh) {
+            out.push(' ');
+            out.push_str(en);
+        }
+        if en.split(' ').any(|w| lower.split(|c: char| !c.is_ascii_alphanumeric()).any(|q| q == w)) {
+            out.push(' ');
+            out.push_str(zh);
+        }
+    }
+    out
+}
+
+/// Ranked Skills and MCP servers for a task. BM25 on name/description (and
+/// cached tool names for MCPs), plus a prior from how often each item was
+/// used in this project and overall.
+fn find_hits(ctx: &Ctx, query: &str, cwd: &std::path::Path, limit: usize) -> Result<Vec<Value>> {
+    let stats = usage::collect(&ctx.paths, 90).ok();
+    let root = project_root(cwd);
+    let prior = |u: Option<usage::SkillUse>| -> (f64, f64) {
+        let Some(u) = u else { return (0.0, 0.0) };
+        let here: usize =
+            u.cwds.iter().filter(|(c, _)| std::path::Path::new(c).starts_with(&root)).map(|(_, n)| n).sum();
+        ((here as f64).ln_1p(), (u.total() as f64).ln_1p())
+    };
+    let mut items: Vec<(String, String, Value, (f64, f64))> = Vec::new();
+    let catalog = skills::catalog(&ctx.hub_root()).unwrap_or_default();
+    let mut seen = BTreeSet::new();
+    for e in &catalog {
+        if !seen.insert(e.name.clone()) {
+            continue;
+        }
+        let u = stats
+            .as_ref()
+            .map(|s| s.lookup(&e.name, e.skill_md.parent().and_then(|p| p.file_name()).and_then(|n| n.to_str())));
+        items.push((
+            e.name.replace('-', " "),
+            e.description.clone(),
+            json!({"kind": "skill", "name": e.name, "description": e.description,
+                   "resident": !e.profiles.is_empty(), "use": format!("fusebox skills show {}", e.name)}),
+            prior(u),
+        ));
+    }
+    let config = ctx.config()?;
+    for tool in config.tools.iter().filter(|t| t.enabled) {
+        let tools: Vec<(String, String)> = hub::cached_manifest(&ctx.paths, &tool.id)
+            .and_then(|m| m["tools"].as_array().cloned())
+            .unwrap_or_default()
+            .iter()
+            .map(|t| {
+                (t["name"].as_str().unwrap_or("").to_string(), t["description"].as_str().unwrap_or("").to_string())
+            })
+            .collect();
+        let short = tool.id.trim_start_matches("agent-").replace('-', "_");
+        let text = format!(
+            "{} {}",
+            tool.description.as_str().unwrap_or(""),
+            tools
+                .iter()
+                .map(|(n, d)| format!("{n} {}", d.chars().take(200).collect::<String>()))
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
+        let usage = if tool.mode == Mode::Hub {
+            format!(
+                "agent-hub MCP: fusebox_servers {{\"server\": \"{short}\"}} starts it and lists its tools; then fusebox_call"
+            )
+        } else {
+            format!("resident: call its tools directly as mcp__{}__<tool>", tool.id)
+        };
+        let u = stats.as_ref().and_then(|s| s.mcps.get(&tool.id).cloned());
+        items.push((
+            format!("{} {}", tool.name, short.replace('_', " ")),
+            text,
+            json!({"kind": "mcp", "name": tool.name, "server": short, "description": tool.description,
+                   "resident": tool.mode == Mode::Direct, "tools": tools.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>(),
+                   "use": usage}),
+            prior(u),
+        ));
+    }
+    let docs: Vec<(String, String)> = items.iter().map(|(n, t, _, _)| (n.clone(), t.clone())).collect();
+    let index = skills::Bm25::new(&docs);
+    let query = &widen_query(query);
+    let mut scored: Vec<(f64, Value)> = items
+        .into_iter()
+        .enumerate()
+        .filter_map(|(i, (_, _, mut v, (here, total)))| {
+            let text = index.score(i, query);
+            if text <= 0.0 {
+                return None;
+            }
+            let score = text + 1.5 * here + 0.3 * total;
+            v["score"] = json!((score * 100.0).round() / 100.0);
+            Some((score, v))
+        })
+        .collect();
+    scored.sort_by(|a, b| b.0.total_cmp(&a.0));
+    scored.truncate(limit);
+    Ok(scored.into_iter().map(|(_, v)| v).collect())
+}
+
+fn cmd_find(ctx: &Ctx, a: &Args) -> Result<i32> {
+    a.check(&["json", "limit", "cwd"])?;
+    let query = a.pos.join(" ");
+    if query.trim().is_empty() {
+        return Err("usage: fusebox find WORDS".into());
+    }
+    let limit = a.one("limit").and_then(|v| v.parse().ok()).unwrap_or(5);
+    let cwd = a.one("cwd").map(util::expand_user).unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+    let hits = find_hits(ctx, &query, &cwd, limit)?;
+    if a.flag("json") {
+        print(&(json_ordered(&json!({"query": query, "results": hits})) + "\n"));
+        return Ok(0);
+    }
+    if hits.is_empty() {
+        print(&format!("Nothing matches \"{query}\". Try other words (English and Chinese), or `fusebox mcp list`.\n"));
+        return Ok(0);
+    }
+    for v in &hits {
+        let desc: String = v["description"].as_str().unwrap_or("").chars().take(150).collect();
+        print(&format!(
+            "[{}] {}{}\n    {desc}\n    → {}\n",
+            v["kind"].as_str().unwrap_or(""),
+            v["name"].as_str().unwrap_or(""),
+            if v["resident"] == true { " (resident)" } else { "" },
+            v["use"].as_str().unwrap_or("")
+        ));
+    }
+    Ok(0)
+}
+
+// ---- hook: per-prompt hints for Claude Code ----
+
+/// `UserPromptSubmit` hook. Reads the hook JSON on stdin and, when Fusebox
+/// has a confident match for the prompt, adds one short context block.
+/// Always exits 0 and stays silent on any problem: a hint must never block
+/// the user's prompt.
+fn cmd_hook(ctx: &Ctx, a: &Args) -> Result<i32> {
+    if a.pos.first().map(String::as_str) != Some("claude-prompt") {
+        return Err("usage: fusebox hook claude-prompt  (reads the hook JSON on stdin)".into());
+    }
+    use std::io::Read;
+    let mut input = String::new();
+    let _ = std::io::stdin().take(1 << 20).read_to_string(&mut input);
+    let Ok(event) = serde_json::from_str::<Value>(&input) else { return Ok(0) };
+    let prompt = event["prompt"].as_str().unwrap_or("").trim();
+    if prompt.is_empty() || prompt.starts_with('/') {
+        return Ok(0);
+    }
+    let cwd = event["cwd"].as_str().map(PathBuf::from).unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+    let Ok(hits) = find_hits(ctx, prompt, &cwd, 3) else { return Ok(0) };
+    // Only confident matches; a weak list is noise every turn.
+    let strong: Vec<&Value> = hits.iter().filter(|h| h["score"].as_f64().unwrap_or(0.0) >= 6.0).collect();
+    if strong.is_empty() {
+        return Ok(0);
+    }
+    let mut lines =
+        vec!["Fusebox: on-demand skills/MCP servers that may fit this request (load only if relevant):".to_string()];
+    for h in strong {
+        let desc: String = h["description"].as_str().unwrap_or("").chars().take(100).collect();
+        lines.push(format!("- {} — {desc} → {}", h["name"].as_str().unwrap_or(""), h["use"].as_str().unwrap_or("")));
+    }
+    let out =
+        json!({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": lines.join("\n")}});
+    print(&(out.to_string() + "\n"));
     Ok(0)
 }
