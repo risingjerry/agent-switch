@@ -38,6 +38,7 @@ Fusebox 让每个 MCP 和 Skill 只有两种状态：
 
 ```bash
 # macOS：命令行 + App
+brew tap risingjerry/tap && brew trust --tap risingjerry/tap
 brew install risingjerry/tap/fusebox
 brew install --cask risingjerry/tap/fusebox
 

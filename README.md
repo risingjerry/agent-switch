@@ -43,6 +43,7 @@ sessions what gets used.
 
 ```bash
 # macOS: CLI + app
+brew tap risingjerry/tap && brew trust --tap risingjerry/tap
 brew install risingjerry/tap/fusebox
 brew install --cask risingjerry/tap/fusebox
 
