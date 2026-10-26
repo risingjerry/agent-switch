@@ -29,8 +29,8 @@ struct ToolsView: View {
                 }
             } else {
                 List(selection: $selection) {
-                    ForEach([MCPMode.direct, .hub, .off], id: \.self) { mode in
-                        let items = rows.filter { $0.effectiveMode == mode }
+                    ForEach([MCPMode.direct, .hub], id: \.self) { mode in
+                        let items = rows.filter { $0.effectiveMode == mode || (mode == .hub && $0.effectiveMode == .off) }
                         if !items.isEmpty {
                             Section {
                                 ForEach(items) { server in
@@ -111,7 +111,8 @@ private struct MCPRow: View {
     }
 
     var body: some View {
-        let mode = server.effectiveMode
+        // Two states only; a legacy disabled entry reads as on demand.
+        let mode = server.effectiveMode == .direct ? MCPMode.direct : .hub
         let lacking = server.requiredSecrets.filter { missing.contains($0) }
         HStack(spacing: 12) {
             Text(String(server.name.prefix(1)).uppercased())
@@ -141,7 +142,7 @@ private struct MCPRow: View {
                 Picker(L10n.apps, selection: Binding(get: { mode }, set: { next in
                     Task { await state.setMode(server, next) }
                 })) {
-                    ForEach([MCPMode.direct, .hub, .off], id: \.self) { m in
+                    ForEach([MCPMode.direct, .hub], id: \.self) { m in
                         Text(m.title).tag(m)
                     }
                 }

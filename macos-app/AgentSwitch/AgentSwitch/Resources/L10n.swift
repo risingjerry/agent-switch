@@ -57,11 +57,12 @@ enum L10n {
 
     // MCP
     static var modeOff: String { t("Off", "关闭") }
-    static var modeDirect: String { t("Always on", "常驻") }
+    static var modeDirect: String { t("Resident", "常驻") }
     static var modeHub: String { t("On demand", "按需") }
-    static var modeHelp: String { t(
-        "Always on: each agent starts it with every session. On demand: it starts on first use and stops when idle.",
-        "常驻：每个会话都会启动它。按需：第一次用到才启动，闲置后自动关闭。") }
+    static var modeHelp: String {
+        t("Resident: started with every session. On demand: started the first time an agent uses it, stopped when idle — agents reach it through Fusebox.",
+          "常驻：每个会话都会启动。按需：Agent 第一次用到时才启动，闲置自动关闭；Agent 通过 Fusebox 随时能找到它。")
+    }
     static var tools: String { t("tools", "个工具") }
     static var command: String { t("Command", "启动命令") }
     static var arguments: String { t("Arguments", "参数") }
@@ -79,7 +80,7 @@ enum L10n {
     // Skills
     static var usage: String { t("Usage", "使用情况") }
     static var library: String { t("Library", "全部 Skill") }
-    static var cleanUp: String { t("Clean up…", "清理…") }
+    static var cleanUp: String { t("Make unused on demand…", "没用的改成按需…") }
     static var lastUsed: String { t("Last used", "最近使用") }
     static var size: String { t("Listing size", "占用字数") }
     static var profiles: String { t("Profiles", "启用于") }
@@ -106,17 +107,18 @@ enum L10n {
     static var copyPrompt: String { t("Copy", "复制") }
     static var noSuggestions: String { t("Nothing to change — everything is synced and in use.", "没有需要调整的，一切都在正常使用。") }
     static var needsYou: String { t("needs you", "需要你来") }
-    static var cleanupTitle: String { t("Turn off unused skills", "停用没用过的 Skill") }
-    static var cleanupHint: String { t(
-        "Turned-off skills stay on disk and can be turned back on anytime.",
-        "停用后文件仍保留在硬盘上，随时可以重新启用。") }
+    static var cleanupTitle: String { t("Make unused skills on demand", "把没用过的 Skill 改成按需") }
+    static var cleanupHint: String {
+        t("On-demand skills stop costing context in every session; agents still find them with fusebox skills search.",
+          "改成按需后不再占每个会话的上下文；Agent 需要时用 fusebox skills search 照样能找到。")
+    }
     static var kept: String { t("Kept automatically", "自动保留") }
-    static func turnOff(_ n: Int) -> String { t("Turn off \(n)", "停用 \(n) 个") }
+    static func turnOff(_ n: Int) -> String { t("Make \(n) on demand", "\(n) 个改成按需") }
     static var nothingToClean: String { t("Every enabled skill was used in this period.", "这段时间里每个启用的 Skill 都用过。") }
     static var profile: String { t("Profile", "范围") }
-    static var statusGlobal: String { t("Global", "全局") }
-    static var statusProject: String { t("Project", "项目") }
-    static var statusDormant: String { t("Off", "未启用") }
+    static var statusGlobal: String { t("Resident everywhere", "全局常驻") }
+    static var statusProject: String { t("Resident in projects", "项目常驻") }
+    static var statusDormant: String { t("On demand", "按需") }
     static var statusMissing: String { t("Missing", "缺失") }
     static var search: String { t("Search", "搜索") }
 

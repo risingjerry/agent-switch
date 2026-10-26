@@ -85,9 +85,9 @@ struct DashboardView: View {
         let missing = state.missingSecrets.count
         return LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), spacing: DS.pad)], spacing: DS.pad) {
             tile(.mcp) {
-                StatTile(symbol: Page.mcp.symbol, title: L10n.mcp, value: "\(enabled.count)",
-                         detail: L10n.t("\(hub) on demand · \(state.mcps.count - enabled.count) off",
-                                        "\(hub) 个按需 · \(state.mcps.count - enabled.count) 个关闭"))
+                StatTile(symbol: Page.mcp.symbol, title: L10n.mcp, value: "\(enabled.count - hub)",
+                         detail: L10n.t("resident · \(hub + state.mcps.count - enabled.count) on demand",
+                                        "个常驻 · \(hub + state.mcps.count - enabled.count) 个按需"))
             }
             tile(.skills) {
                 StatTile(symbol: Page.skills.symbol, title: L10n.skills, value: "\(usage?.enabled.count ?? 0)",
