@@ -9,26 +9,22 @@ permissions:
   contents: read
 
 jobs:
-  python:
-    runs-on: macos-14
+  cli:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12", "3.13", "3.14"]
+        os: [macos-15, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: ${{ matrix.python-version }}
-      - run: python -m pip install --upgrade build
-      - run: PYTHONPATH=src python -m unittest discover -s tests -v
-      - run: PYTHONPATH=src python -m unittest discover -s tests/integration -v
-      - run: python -m build
-      - run: python -m pip install --force-reinstall dist/*.whl
-      - run: agent-switch --version
+      - run: rustup component add clippy rustfmt
+      - run: cargo fmt --check
+      - run: cargo clippy --release --all-targets --locked -- -D warnings
+      - run: cargo test --release --locked
+      - run: ./target/release/fusebox --version
 
   macos-app:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v7
       - run: swift build --package-path macos-app/AgentSwitch
@@ -37,22 +33,13 @@ jobs:
           -project macos-app/AgentSwitch/AgentSwitch.xcodeproj
           -scheme AgentSwitch
           -configuration Release
-          -derivedDataPath "$RUNNER_TEMP/AgentSwitchDerivedData"
+          -derivedDataPath "$RUNNER_TEMP/FuseboxDerivedData"
           CODE_SIGNING_ALLOWED=NO
           build
 
   privacy:
-    runs-on: macos-14
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - name: Reject common credential and private-path shapes
         run: python3 scripts/privacy_scan.py
-
-  installer:
-    runs-on: macos-14
-    steps:
-      - uses: actions/checkout@v7
-      - run: zsh -n scripts/install.sh
-      - run: test -x scripts/install.sh
-      - run: zsh -n scripts/build-release.sh
-      - run: test -x scripts/build-release.sh

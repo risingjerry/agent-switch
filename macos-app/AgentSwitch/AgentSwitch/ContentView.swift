@@ -1,73 +1,60 @@
-// [INPUT]: SwiftUI, AppState, Navigation views
-// [OUTPUT]: Root content view with sidebar navigation
-// [POS]: Main navigation host; routes between feature views
+// [INPUT]: SwiftUI, AppState, SidebarView, feature views
+// [OUTPUT]: ContentView — split view, toolbar and error alert
+// [POS]: Root view of the main window
 // [PROTOCOL]: When this file changes, update this header, then check CLAUDE.md
 
 import SwiftUI
 
 struct ContentView: View {
-    @EnvironmentObject var appState: AppState
-    @State private var selection: SidebarItem = .dashboard
-    @State private var showingAgentOnboarding = false
-    @AppStorage("didCompleteAgentOnboarding") private var didCompleteAgentOnboarding = false
+    @Environment(AppState.self) private var state
+    @AppStorage(L10n.languageKey) private var language = "system"
 
     var body: some View {
+        @Bindable var state = state
         NavigationSplitView {
-            SidebarView(selection: $selection)
+            SidebarView(selection: $state.page)
         } detail: {
-            switch selection {
-            case .dashboard:
-                DashboardView()
-            case .agents:
-                AgentsView()
-            case .clis:
-                CLIsView()
-            case .skills:
-                SkillsView()
-            case .tools:
-                ToolsView()
-            case .secrets:
-                SecretsView()
-            case .settings:
-                SettingsView()
-            }
-        }
-        .navigationSplitViewStyle(.balanced)
-        .tint(DSColor.textPrimary)
-        .preferredColorScheme(.light)
-        .task {
-            if appState.report == nil {
-                await appState.refresh()
-            }
-            if !didCompleteAgentOnboarding && appState.agents.contains(where: { $0.detected && !$0.managed }) {
-                showingAgentOnboarding = true
-            }
-        }
-        .sheet(isPresented: $showingAgentOnboarding) {
-            AgentOnboardingView {
-                await appState.runReconcile()
-                didCompleteAgentOnboarding = appState.agents.filter(\.detected).allSatisfy(\.managed)
-                return didCompleteAgentOnboarding
-            } onSkip: {
-                didCompleteAgentOnboarding = true
-            }
-            .environmentObject(appState)
-        }
-        .toolbar {
-            ToolbarItem {
-                Button {
-                    Task { await appState.runReconcile() }
-                } label: {
-                    if appState.isLoading {
-                        ProgressView()
-                            .controlSize(.small)
-                    } else {
-                        Label(L10n.syncAndCheck, systemImage: "arrow.triangle.2.circlepath")
+            detail
+                .toolbar {
+                    ToolbarItem(placement: .primaryAction) { LanguageMenu() }
+                    ToolbarItemGroup(placement: .primaryAction) {
+                        Button {
+                            Task { await state.refresh() }
+                        } label: {
+                            Label(L10n.refresh, systemImage: "arrow.clockwise")
+                        }
+                        .help(L10n.refresh)
+                        Button {
+                            Task { await state.sync() }
+                        } label: {
+                            Label(L10n.sync, systemImage: "arrow.triangle.2.circlepath")
+                        }
+                        .help(L10n.sync)
+                        .disabled(state.syncing)
                     }
                 }
-                .disabled(appState.isLoading)
-                .help(L10n.syncAndCheck)
-            }
+        }
+        .id(language)
+        .task { await state.refresh() }
+        .onChange(of: language) { Task { await state.loadAdvice() } }
+        .alert(
+            L10n.t("Something went wrong", "出错了"),
+            isPresented: Binding(get: { state.error != nil }, set: { if !$0 { state.error = nil } })
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(state.error ?? "")
+        }
+    }
+
+    @ViewBuilder private var detail: some View {
+        @Bindable var state = state
+        switch state.page {
+        case .overview: DashboardView(page: $state.page)
+        case .mcp: ToolsView()
+        case .skills: SkillsView()
+        case .secrets: SecretsView()
+        case .clis: CLIsView()
         }
     }
 }

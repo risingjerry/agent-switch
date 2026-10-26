@@ -3,412 +3,184 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/agent-switch-icon.png" width="112" alt="Agent Switch app icon">
+  <img src="docs/assets/fusebox-icon.png" width="104" alt="Fusebox icon">
 </p>
 
-<h1 align="center">Agent Switch</h1>
+<h1 align="center">Fusebox</h1>
 
 <p align="center">
-  <strong>Define each MCP once. Store each credential once. Project both into every supported local AI agent.</strong>
+  <strong>Every MCP server and Skill your AI agents need — on demand, from one place.</strong><br>
+  One catalog, one secret store and lazy MCP servers for Claude Code, Codex, DeepSeek Harness, Claude Desktop and Hermes.
 </p>
 
 <p align="center">
-  <a href="https://github.com/risingjerry/agent-switch/actions/workflows/ci.yml"><img src="https://github.com/risingjerry/agent-switch/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
-  <a href="https://www.apple.com/macos/"><img src="https://img.shields.io/badge/macOS-14%2B-111111?logo=apple" alt="macOS 14 or newer"></a>
+  <a href="https://github.com/risingjerry/fusebox/actions/workflows/ci.yml"><img src="https://github.com/risingjerry/fusebox/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/risingjerry/fusebox/releases"><img src="https://img.shields.io/github/v/release/risingjerry/fusebox?color=111111" alt="Release"></a>
+  <img src="https://img.shields.io/badge/macOS%2014%2B%20%C2%B7%20Linux%20CLI-111111" alt="macOS 14+ and Linux CLI">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-111111.svg" alt="MIT license"></a>
+  <a href="https://github.com/risingjerry/fusebox/stargazers"><img src="https://img.shields.io/github/stars/risingjerry/fusebox?style=flat&color=111111" alt="Stars"></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/risingjerry/agent-switch/stargazers"><img src="https://img.shields.io/github/stars/risingjerry/agent-switch?style=flat-square&label=stars" alt="GitHub stars"></a>
-  <a href="https://github.com/risingjerry/agent-switch/forks"><img src="https://img.shields.io/github/forks/risingjerry/agent-switch?style=flat-square&label=forks" alt="GitHub forks"></a>
-  <a href="https://github.com/risingjerry/agent-switch/commits/main"><img src="https://img.shields.io/github/commit-activity/t/risingjerry/agent-switch?style=flat-square&label=commits" alt="GitHub commit activity"></a>
-  <a href="https://github.com/risingjerry/agent-switch/releases"><img src="https://img.shields.io/github/downloads/risingjerry/agent-switch/total?style=flat-square&label=downloads" alt="Release downloads"></a>
-  <img src="https://visitor-badge.laobi.icu/badge?page_id=JNHFlow21.agent-switch&left_text=README%20visits" alt="README visit counter">
+  <img src="docs/demo.gif" width="760" alt="fusebox find ranks Skills and MCP servers for a task in English or Chinese">
 </p>
 
-<p align="center"><img src="docs/demo.gif" width="820" alt="Terminal demo: store a secret from stdin, define one MCP server with agent-switch mcp add, preview per-agent changes with reconcile --dry-run, apply, and check status (synthetic example data)"></p>
+Install a hundred Skills and a dozen MCP servers and every agent session pays
+for all of them: descriptions fill the context window, MCP processes sit
+running, and each agent keeps its own copy of the config and the API keys.
+
+Fusebox gives every MCP server and Skill one of two states:
+
+- **Resident** — loaded in every session, because you asked for it.
+- **On demand** — everything else. Agents see the name, find it when a task
+  needs it, load it, and the MCP process stops again when idle.
+
+It writes each agent's native config from one registry, keeps secrets in one
+file that only the MCP that declares a key can read, and measures from your own
+sessions what gets used.
+
+## Install
+
+```bash
+# macOS: CLI + app
+brew install risingjerry/tap/fusebox
+brew install --cask risingjerry/tap/fusebox
+
+# any platform with Rust (CLI; the app needs macOS + Xcode)
+git clone https://github.com/risingjerry/fusebox && fusebox/scripts/install.sh
+```
+
+Then:
+
+```bash
+fusebox doctor                     # what it found and what it would write (writes nothing)
+fusebox skills add-source my-skills --path ~/.claude/skills-src   # or --git URL
+fusebox mcp add github --command npx --arg -y --arg @example/github-mcp@1.2.3 --secret GITHUB_TOKEN
+printf %s "$TOKEN" | fusebox secret set --stdin GITHUB_TOKEN   # the value never appears in argv or logs
+fusebox reconcile                  # write every agent's config (backups first)
+```
+
+New MCP servers and Skills are **on demand** by default. Make one resident
+with `fusebox mcp direct ID` or `fusebox skills enable global NAME`.
+
+## What you get
+
+| | |
+|---|---|
+| **One catalog** | `fusebox find "merge two PDFs"` ranks Skills and MCP servers together, in English or Chinese, favouring what you used in this project. |
+| **Lazy MCP servers** | Agents get one `agent-hub` MCP. A server starts on its first call, gets only its own secrets, and stops after 5 idle minutes. Servers with hundreds of tools are listed by name, schemas on request. |
+| **Name lists, not walls of text** | Claude Code sees every on-demand Skill by name (`name-only`); the 30 you use most keep a one-line description. Codex and DeepSeek Harness get the same list in their instructions. |
+| **One secret store** | `~/.config/fusebox/secrets.env` (0600). Values go in through stdin or a file descriptor, never arguments; each MCP wrapper exports only the keys it declares. |
+| **Usage and advice** | `fusebox skills usage` reads Claude Code, Codex and DeepSeek Harness transcripts. `fusebox advise` turns that into concrete commands: what to make resident, what to move to one project, what agents stopped finding. |
+| **Measured discovery** | `fusebox eval` replays your real prompt → Skill picks against `find` and keeps a history, so a change that hurts shows up. |
+| **macOS app** | A dashboard in English and Chinese. People look; agents make the changes. |
 
 <p align="center">
-  <img src="docs/assets/agent-switch-dashboard-en.png" width="820" alt="Agent Switch dashboard showing health, configuration drift, MCP routes, and credential availability">
+  <img src="docs/assets/fusebox-overview.png" width="760" alt="Fusebox app overview with MCP, Skills, secrets and agent sync status (demo data)">
 </p>
 
-<p align="center">
-  <sub>The real macOS dashboard, shown with an isolated example configuration, exposes health, drift, routes, and credential availability—never credential values.</sub>
-</p>
+## Use with Claude Code, Codex and other agents
 
-Codex, Claude Code, Claude Desktop, and Hermes each keep their own MCP
-configuration. Copying the same servers and credentials into every client
-creates drift and spreads secrets across files.
-
-Agent Switch replaces those copies with one local registry, one private
-credential store, and deterministic per-agent projections.
-
-> [!IMPORTANT]
-> Agent Switch is **alpha software**. The public app is ad-hoc signed and is not
-> Apple-notarized. The project-owned Homebrew Cask therefore removes Gatekeeper
-> quarantine after installation. Review the [public source](https://github.com/risingjerry/agent-switch)
-> and [release checksums](https://github.com/risingjerry/agent-switch/releases/tag/v0.3.0)
-> before installing.
-
-The native app follows the macOS language preference and ships complete
-**English** and **Simplified Chinese** interface catalogs.
-
-## Quick start
-
-### Prerequisites
-
-- macOS 14 or newer
-- Homebrew 6.0 or newer
-
-### Install
-
-Paste one verified command:
+Install the bundled skill so any agent knows how to drive Fusebox:
 
 ```bash
-brew tap risingjerry/tap && brew trust --tap risingjerry/tap && brew install --cask risingjerry/tap/agent-switch
+npx skills add risingjerry/fusebox        # or copy skills/fusebox to ~/.claude/skills/
 ```
 
-Homebrew:
+Then ask:
 
-1. registers and explicitly trusts the project-owned Tap;
-2. installs the `agent-switch` CLI through `agent-switch-cli`;
-3. installs the universal native app at `/Applications/Agent Switch.app`;
-4. removes Gatekeeper quarantine because this alpha is not notarized;
-5. leaves MCP adoption and native agent configuration unchanged.
+- "Find a skill for turning this outline into slides."
+- "Which of my Skills and MCP servers are worth keeping resident? Show me, then apply what I approve."
+- "Add the Brave Search MCP on demand; I'll paste the key."
 
-Expected first result:
+Agents call `fusebox find`, `fusebox advise --json` and the hub's
+`fusebox_servers` / `fusebox_call` tools. [AGENTS.md](AGENTS.md) is the guide
+for agents working on this repository.
 
-```text
-agent-switch --version  -> agent-switch 0.3.0
-Native app              -> /Applications/Agent Switch.app
-```
+## Commands
 
-Open Agent Switch from Applications, or run:
+| Command | What it does |
+|---|---|
+| `fusebox status` / `doctor` | drift, missing secrets, findings; writes nothing |
+| `fusebox reconcile [--dry-run]` | write native configs, wrappers and instructions (with backups) |
+| `fusebox find WORDS` | rank Skills and MCP servers for a task |
+| `fusebox mcp list\|add\|set\|remove\|import` | manage MCP servers; `mcp hub ID` / `mcp direct ID` switch on demand / resident |
+| `fusebox secret set --stdin NAME` · `list` · `delete` | the secret store (names only on output) |
+| `fusebox skills add-source\|fetch\|enable\|disable\|move\|drop\|restore` | Skill sources and states |
+| `fusebox skills usage` · `advise` · `eval` | what is used, what to change, how well `find` works |
 
-```bash
-open -a "Agent Switch"
-agent-switch mcp import --dry-run --json
-agent-switch doctor
-```
-
-Review the detected MCP IDs, target apps, and required secret **names** before
-running `agent-switch mcp import --adopt` or `agent-switch reconcile`.
-
-<details>
-<summary>Why Homebrew instead of npm or NPX?</summary>
-
-Agent Switch is a native macOS application with a Python CLI; Node.js is not
-part of its runtime. npm/NPX would add an unrelated dependency and still need
-to build or download the macOS app.
-
-The current alpha distribution is:
-
-```text
-ad-hoc signed release artifact -> GitHub Releases -> project-owned Homebrew Cask
-```
-
-Developer ID signing and notarization remain the stable-release target. See the
-[roadmap](docs/roadmap.md).
-
-</details>
-
-## What changes for you
-
-| Before Agent Switch | With Agent Switch |
-| --- | --- |
-| The same MCP is configured separately in every agent | Register it once and choose its target agents |
-| API keys are copied into native client configs | Values remain in one private local store |
-| A changed MCP silently drifts between clients | `doctor` reports drift; `reconcile` repairs it |
-| Every MCP can inherit the entire shell environment | Each wrapper injects only its declared secret names |
-| Existing config migration is an all-or-nothing edit | Preview first, then explicitly adopt with backups |
-
-New installations start with an empty registry. Agent Switch does not install
-the maintainer's preferred MCPs or request unrelated credentials.
-
-## Core workflow
-
-```bash
-# 1. Preview supported user-level stdio MCPs without changing files
-agent-switch mcp import --dry-run --json
-
-# 2. Back up native configs and explicitly adopt the previewed MCPs
-agent-switch mcp import --adopt
-
-# 3. Write a credential locally without putting its value in argv or chat
-secret-producing-command | agent-switch secret set --stdin SEARCH_API_KEY
-
-# 4. Preview health and drift, then apply the central state
-agent-switch doctor
-agent-switch reconcile
-
-# 5. Require a clean managed state
-agent-switch doctor --strict
-```
-
-Never replace `secret-producing-command` with a literal secret in a recorded
-command. The macOS app is the simplest interactive way to enter a value.
-
-## What Agent Switch manages
-
-| Area | Current behavior |
-| --- | --- |
-| **MCP servers** | Import, add, edit, target, enable, disable, remove, and reconcile user-level command/stdio MCPs |
-| **Credentials** | Store values once and grant each MCP only its declared secret names |
-| **Agent policy** | Synchronize bounded instruction blocks for Codex, Claude Code, and Hermes |
-| **Health** | Detect invalid config, missing secret names, unpinned `npx` packages, blocked targets, and managed drift |
-| **Recovery** | Write atomically and back up native files before migration or replacement |
-| **CLI inventory** | Show installed AI tools, versions, package managers, and executable paths |
-| **Skills** | Inventory optional Skill Hub sources without treating download as activation |
-| **CC Switch** | Preserve provider switching and mirror only Agent Switch-owned MCP rows |
+Every read command takes `--json`. Full help: `fusebox --help`.
 
 ## How it works
 
-```mermaid
-flowchart LR
-    UI["macOS app or CLI"] --> C["Central config"]
-    C --> D["Doctor"]
-    D --> R["Reconcile"]
-    S["Private secret store"] --> W["Per-MCP wrappers"]
-    R --> X["Secret-free agent configs"]
-    W --> M["MCP processes"]
-    X --> A["Codex"]
-    X --> B["Claude Code / Desktop"]
-    X --> H["Hermes"]
+```
+             fusebox reconcile
+config.json ───────────────────▶ ~/.claude.json, ~/.claude/settings.json, ~/.claude/skills
+secrets.env                      ~/.codex/config.toml + AGENTS.md
+Skill Hub                        ~/.dsh/cordis.patch.yml + AGENTS.md, Claude Desktop, Hermes
+
+agent ──▶ agent-hub (one stdio MCP) ──first call──▶ wrapper ──▶ MCP server (own secrets only)
+                                     ◀──idle 5 min── stop
 ```
 
-| Local source of truth | Default path |
-| --- | --- |
-| MCP definitions and grants | `~/.config/agent-switch/config.json` |
-| Credential values | `~/.config/agent-switch/secrets.env` |
-| Generated MCP wrappers | `~/.config/agent-switch/mcp/bin/` |
-| Native config backups | `~/.config/agent-switch/backups/` |
+- Fusebox owns only `agent-*` MCP entries and its own marked instruction
+  blocks; everything else in those files is preserved.
+- Skills live in a Skill Hub (default `~/.config/fusebox/skill-hub`; set
+  `skillHub` in `config.json` or `SKILL_HUB_HOME` to use another) with locked
+  git sources and per-project profiles.
 
-Agent Switch owns only `agent-*` MCP entries and marked instruction blocks.
-Unrelated provider and MCP settings are preserved.
+## Does on demand pick worse than loading everything?
 
-## Supported integrations
-
-| Integration | MCP sync | Shared policy | Inventory |
-| --- | :---: | :---: | :---: |
-| Codex | ✓ | ✓ | ✓ |
-| Claude Code | ✓ | ✓ | ✓ |
-| Claude Desktop | ✓ | — | — |
-| Hermes | ✓ | ✓ | ✓ |
-| CC Switch | Owned-row mirror | Provider settings preserved | Schema check |
-| Skill Hub | Skill inventory/update | Explicit project/global profiles | ✓ |
-
-A new agent requires a tested adapter. Agent Switch does not guess unknown
-configuration formats.
-
-## Credential and privacy boundaries
-
-Agent Switch is local-first, but it is **not a password vault**.
-
-- Credential values stay in a local mode-`0600` file, not in Git, app
-  preferences, generated agent configs, or wrapper source.
-- Secret writes use stdin or inherited file descriptors, never positional
-  arguments.
-- Secret reads refuse stdout, stderr, terminals, and aliased descriptors.
-- Wrappers parse the store as data, remove inherited sensitive variables, and
-  inject only the names granted to that MCP.
-- Diagnostics, import previews, and audits report secret **names**, never
-  values.
-- Wrappers fail closed when a required secret name is missing.
-- No upload service or cloud account is implemented. An MCP can still contact
-  its own provider when an agent invokes it.
-
-Read [Secrets and wrappers](docs/secrets-and-wrappers.md) and the
-[Security Policy](SECURITY.md) before using sensitive credentials. Security
-reports should follow the private reporting route in `SECURITY.md`, not a public
-issue.
-
-## Current alpha scope
-
-Version 0.2 manages user-level command/stdio MCP definitions and static
-credential values on macOS.
-
-It does **not** yet provide:
-
-- migration for native HTTP/SSE transports or OAuth sessions;
-- project-scoped MCP discovery;
-- automatic support for unknown agents;
-- a Developer ID-signed and notarized downloadable app;
-- a published PyPI package;
-- a password-manager or hardware-backed credential vault.
-
-These are limitations, not hidden features. Planned work lives in the
-[roadmap](docs/roadmap.md).
-
-## Use with Claude Code / Codex
-
-Install the bundled skill so your agent can drive the `agent-switch` CLI safely (secrets by stdin only, preview before apply):
-
-```bash
-npx skills add risingjerry/agent-switch
-```
-
-Manual copy: `cp -R skills/agent-switch ~/.claude/skills/` (Claude Code) or `~/.agents/skills/` (Codex and compatible agents). Example prompts:
-
-- "Run agent-switch doctor and tell me which MCP servers have drifted or are missing secrets."
-- "Import the MCP servers already configured in my agents, show me the dry run first."
-- "Add the filesystem MCP to Codex and Claude Code through agent-switch, then reconcile."
-
-Working on this repo? Agents should read [AGENTS.md](AGENTS.md).
-
-## Command reference
-
-```bash
-agent-switch agents               # detected agents and policy enrollment
-agent-switch clis                 # installed AI CLI inventory
-agent-switch mcp list             # central MCP registry
-agent-switch secret list          # credential names only
-agent-switch skills               # optional Skill Hub inventory
-agent-switch doctor --json        # machine-readable health report
-agent-switch reconcile --dry-run  # planned managed changes
-```
-
-Add a centrally managed MCP:
-
-```bash
-agent-switch mcp add filesystem \
-  --command npx \
-  --arg=-y \
-  --arg=@modelcontextprotocol/server-filesystem@1.0.0 \
-  --app codex \
-  --app claude
-
-agent-switch reconcile
-```
-
-See [Unified MCP Registry](docs/mcp-registry.md) for lifecycle commands and
-safe import behavior.
-
-## Update
-
-Homebrew installations:
-
-```bash
-brew update
-brew upgrade --cask risingjerry/tap/agent-switch
-```
-
-Agent Switch does not silently update itself, third-party CLIs, or Skill
-sources.
+Not in our measurement. On 112 real prompts where an agent loaded a Skill, a
+model shown only names picked the right Skill in its top 3 as often as one
+shown every full description; names plus a one-line description for the 30 most
+used did better (53% vs 47–48%, two runs each) at a third of the size.
+Run `fusebox eval` to measure `find` on your own sessions.
 
 ## FAQ
 
-### How do I use the same MCP server in Codex and Claude Code without configuring it twice?
+**How do I stop MCP servers from filling Claude Code's context?**
+Put them behind `agent-hub` (`fusebox mcp hub ID`, the default for new ones).
+Claude Code sees the hub's tools by name and loads definitions only when used.
 
-Register it once with `agent-switch mcp add`, choose the target apps with `--app`, then run `agent-switch reconcile`. Agent Switch writes a secret-free `agent-*` entry into each agent's native config.
+**How do I share one set of MCP servers between Claude Code and Codex?**
+Add each server once with `fusebox mcp add`; `fusebox reconcile` writes both
+configs. Both reach every on-demand server through the hub.
 
-### Where should I store API keys for MCP servers?
+**Where are my API keys stored? Can an agent read them?**
+In `~/.config/fusebox/secrets.env` (mode 0600). Native configs only reference
+a wrapper; the wrapper exports only the keys that server declares. Agents see
+key names, never values.
 
-In Agent Switch's private store, written with `agent-switch secret set --stdin NAME`. The values live in a mode-0600 file under `~/.config/agent-switch/`, not in agent configs, Git, or shell history.
+**How do I find which Skills I never use?**
+`fusebox skills usage --days 60` and `fusebox advise`.
 
-### Is Agent Switch a password manager?
+**Does it work on Linux or Windows?**
+The CLI builds and passes CI on Linux; the app is macOS only. Windows is untested.
 
-No. It is a local-first credential store for MCP wrappers with fail-closed injection, not a vault and not hardware-backed. See [Secrets and wrappers](docs/secrets-and-wrappers.md).
-
-### Will it overwrite my existing Codex or Claude configuration?
-
-No. It manages only `agent-*` MCP entries and marked instruction blocks, backs up native files before changing them, and imports existing MCPs only after a preview and an explicit `--adopt`.
-
-### Does it work on Windows or Linux?
-
-No. Agent Switch is macOS 14+ only, with a native app and a Python CLI.
-
-### Why does the Homebrew Cask remove Gatekeeper quarantine?
-
-The alpha app is ad-hoc signed and not Apple-notarized. Review the source and release checksums first; notarization is on the [roadmap](docs/roadmap.md).
-
-### Does it work with CC Switch?
-
-Yes. It keeps CC Switch provider switching intact and mirrors only the MCP rows it owns. See [CC Switch compatibility](docs/ccswitch-compat.md).
+**Is the app signed?**
+Ad-hoc signed, not notarized (no Apple Developer ID yet). The Homebrew cask
+removes the quarantine flag and says so. Build from source if you prefer.
 
 ## Uninstall
 
-Clean up managed state first, while the CLI still exists:
-
 ```bash
-agent-switch mcp list                  # note each managed MCP
-agent-switch mcp remove NAME           # repeat per MCP; removes its managed projections
-agent-switch reconcile
+brew uninstall --cask fusebox; brew uninstall fusebox   # or delete ~/.local/bin/fusebox
 ```
 
-Then remove the software:
+Your agents' configs keep working until you remove the `agent-*` entries;
+backups of every file Fusebox changed are in `~/.config/fusebox/backups`.
 
-```bash
-brew uninstall --cask risingjerry/tap/agent-switch
-brew list agent-switch-cli && brew uninstall agent-switch-cli   # only if the CLI formula is still installed
-brew untap risingjerry/tap                                      # optional
-```
+## Limits
 
-What remains, because Agent Switch never deletes your data on its own:
+- Remote (HTTP/SSE) MCP servers are not managed yet; Fusebox leaves them untouched.
+- Codex has no names-only Skill mode, so Fusebox lists on-demand names in its instructions.
+- The hub does not forward server-to-client requests (sampling, elicitation).
 
-- `~/.config/agent-switch/` holds the registry, `secrets.env`, wrappers, and backups. Delete it only after you no longer need the stored credentials: `rm -rf ~/.config/agent-switch`.
-- Marked instruction blocks (`BEGIN AGENT SWITCH MANAGED INSTRUCTIONS` ... `END`) in agent instruction files such as `~/.claude/CLAUDE.md`; delete the block by hand.
-- Skills you copied to `~/.claude/skills/agent-switch` or `~/.agents/skills/agent-switch`.
+---
 
-## Documentation
+If Fusebox saved your context window, a ⭐ helps others find it.
 
-- [Unified MCP Registry](docs/mcp-registry.md)
-- [Secrets and wrappers](docs/secrets-and-wrappers.md)
-- [CC Switch compatibility](docs/ccswitch-compat.md)
-- [Recovery and rollback](docs/recovery.md)
-- [Roadmap](docs/roadmap.md)
-- [Contributing](CONTRIBUTING.md)
-- [Security Policy](SECURITY.md)
+[![Star History Chart](https://api.star-history.com/svg?repos=risingjerry/fusebox&type=Date)](https://star-history.com/#risingjerry/fusebox&Date)
 
-## Development
-
-The source installer remains available for contributors who have Python 3.11+,
-`pipx`, and full Xcode:
-
-```bash
-git clone https://github.com/risingjerry/agent-switch.git && cd agent-switch && ./scripts/install.sh
-```
-
-For an editable CLI environment:
-
-```bash
-git clone https://github.com/risingjerry/agent-switch.git
-cd agent-switch
-python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install -e .
-python -m unittest discover -s tests
-python -m unittest discover -s tests/integration
-```
-
-The native app lives in [`macos-app/AgentSwitch`](macos-app/AgentSwitch) and
-targets macOS 14+. See [CONTRIBUTING.md](CONTRIBUTING.md) for the complete test
-and privacy gate.
-
-## Project activity
-
-| Public signal | Live or latest owner-visible value |
-| --- | ---: |
-| Stars / forks / commits / release downloads | Live badges above |
-| README visits | Public counter above; may include bots and repeat visits |
-| Unique repository visitors | **0** in the rolling 14-day GitHub Traffic window |
-| Unique Git cloners | **11** (**12** total clones) in the rolling 14-day window |
-
-<sub>Traffic snapshot: 2026-08-10. GitHub exposes clone and unique-visitor analytics only to maintainers, so those values are a dated, transparent snapshot rather than a token-backed public badge.</sub>
-
-### Clone activity
-
-<p align="center">
-  <a href="https://github.com/risingjerry/agent-switch">
-    <img width="800" src="https://raw.githubusercontent.com/risingjerry/agent-switch/metrics/repository-metrics.svg" alt="Agent Switch rolling 14-day clone activity and repository metrics">
-  </a>
-</p>
-
-<sub>The curve shows cumulative clones inside GitHub's rolling 14-day Traffic window. The Traffic series is a dated aggregate owner snapshot; stars, forks, and commits in the side cards refresh after every new star and weekly. No long-lived token is embedded in this README.</sub>
-
-## License
-
-[MIT](LICENSE) © 2026 risingjerry
-
-If Agent Switch saved you from copy-pasting MCP configs, a star on GitHub helps others find it.
-
-[![Star History Chart](https://api.star-history.com/svg?repos=risingjerry/agent-switch&type=Date)](https://star-history.com/#risingjerry/agent-switch&Date)
+MIT © risingjerry · Previously named Agent Switch.

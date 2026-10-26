@@ -1,25 +1,10 @@
-# Social preview kit
-
-Source for `docs/social-preview.jpg` (1280x640, GitHub social preview; the lockup stays inside the centered square so chat-app thumbnails don't crop it).
-
-## Rebuild
-
-Needs Python 3, Google Chrome/Chromium and ffmpeg.
+Regenerate `docs/social-preview.jpg`: `background.jpg` is a text-free oil
+painting made with an image model; `icon-glyph.png` is the app icon's glyph.
 
 ```bash
-python3 docs/social-preview/render.py
+python3 social_preview.py --background docs/social-preview/background.jpg \
+  --icon docs/social-preview/icon-glyph.png --name "Fusebox|MCP & Skills" \
+  --veil 0.15 --out docs/social-preview.jpg
 ```
 
-Defaults use the files in this folder. Override with `--background`, `--icon`, `--name "Line1|Line2"`, `--tagline`, `--out`.
-Then upload `docs/social-preview.jpg` in Settings > General > Social preview (GitHub requires < 1 MB).
-
-## Background prompt
-
-`background.jpg` was generated with Codex image generation:
-
-> Abstract expressive oil painting filling the whole frame, wide 16:9: thick visible brushstrokes, canvas texture, soft painterly blending, diagonal sweeping strokes, editorial OpenAI-blog-cover aesthetic. ABSOLUTELY NO text, letters, logos, symbols, faces or objects. Keep the center calmer and mid-tone so white text stays readable. Palette: deep violet and electric purple family with accents of coral, pink, turquoise and golden yellow.
-
-## Credits
-
-- Icon: `toggle-right` from [Lucide](https://lucide.dev) (ISC license), rendered white.
-- Background: AI-generated, no third-party artwork.
+`social_preview.py` comes from the open-source-launch skill.

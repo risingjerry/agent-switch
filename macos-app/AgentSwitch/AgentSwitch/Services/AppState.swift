@@ -1,233 +1,122 @@
-// [INPUT]: SwiftUI, AgentSwitchService, AgentModels
-// [OUTPUT]: AppState — observable root state and safe Agent, CLI, Skill, and secret operations
-// [POS]: Services — single source of truth for app-wide state
+// [INPUT]: SwiftUI, Observation, AgentSwitchService, AgentModels
+// [OUTPUT]: AppState — observable root state and every user action
+// [POS]: Services — injected into all views through the environment
 // [PROTOCOL]: When this file changes, update this header, then check CLAUDE.md
 
+import Observation
 import SwiftUI
 
 @MainActor
-class AppState: ObservableObject {
-    @Published var report: DoctorReport?
-    @Published var config: ConfigInfo?
-    @Published var agents: [AgentInfo] = []
-    @Published var clis: [CLIInfo] = []
-    @Published var skillReport: SkillReport?
-    @Published var importPreview: MCPImportPreview?
-    @Published var isLoading = false
-    @Published var lastError: String?
-    @Published var lastRefresh: Date?
+@Observable
+final class AppState {
+    let service = AgentSwitchService()
 
-    private let service = AgentSwitchService()
+    var doctor: DoctorReport?
+    var agents: [AgentInfo] = []
+    var mcps: [MCPServer] = []
+    var skills: SkillReport?
+    var usage: SkillUsage?
+    var advice: Advice?
+    var secretNames: [String] = []
+    var clis: [CLIInfo] = []
 
-    private var includeCCSwitch: Bool {
-        UserDefaults.standard.bool(forKey: "includeCCSwitch")
+    var page: Page = .overview
+    var busy = false
+    var syncing = false
+    var loadingUsage = false
+    var error: String?
+
+    var usageDays: Int = UserDefaults.standard.object(forKey: "usageDays") as? Int ?? 60 {
+        didSet { UserDefaults.standard.set(usageDays, forKey: "usageDays") }
     }
 
-    var isHealthy: Bool {
-        if lastError != nil {
-            return false
-        }
-        guard let report else { return true }
-        return !report.blocked && report.driftCount == 0
-    }
+    var pendingCount: Int { doctor?.driftCount ?? 0 }
+    var needsSync: Bool { pendingCount > 0 }
 
-    var sidebarStatusText: String {
-        if isLoading {
-            return L10n.checking
-        }
-        return isHealthy ? L10n.healthy : L10n.needsAttention
-    }
-
-    var toolCount: Int {
-        report?.secrets.required.count ?? 0
-    }
+    // MARK: Loading
 
     func refresh() async {
-        isLoading = true
-        lastError = nil
-        do {
-            config = try await service.getConfig()
-            report = try await service.runDoctor(includeCCSwitch: includeCCSwitch)
-            agents = try await service.getAgents()
-            clis = try await service.getCLIs()
-            skillReport = try await service.getSkills()
-            lastRefresh = Date()
-        } catch {
-            lastError = error.localizedDescription
-        }
-        isLoading = false
+        busy = true
+        defer { busy = false }
+        async let doctor = attempt { try await self.service.doctor() }
+        async let agents = attempt { try await self.service.agents() }
+        async let mcps = attempt { try await self.service.mcps() }
+        async let skills = attempt { try await self.service.skills() }
+        async let secrets = attempt { try await self.service.secretNames() }
+        self.doctor = await doctor ?? self.doctor
+        self.agents = await agents ?? self.agents
+        self.mcps = await mcps ?? self.mcps
+        self.skills = await skills ?? self.skills
+        self.secretNames = await secrets ?? self.secretNames
+        if advice != nil { await loadAdvice() }
     }
 
-    func runDoctor() async {
+    func loadUsage() async {
+        loadingUsage = true
+        defer { loadingUsage = false }
+        usage = await attempt { try await self.service.usage(days: self.usageDays) } ?? usage
+    }
+
+    func loadAdvice() async {
+        advice = await attempt { try await self.service.advise(days: self.usageDays) } ?? advice
+    }
+
+    func loadCLIs() async {
+        clis = await attempt { try await self.service.clis() } ?? clis
+    }
+
+    // MARK: Actions
+
+    /// Every write is followed by a reconcile so agents pick it up; the
+    /// result is then re-read so the UI never shows stale state.
+    func perform(_ action: @escaping () async throws -> Void, reconcile: Bool = true) async {
+        syncing = true
+        defer { syncing = false }
+        do {
+            try await action()
+            if reconcile { try await service.reconcile() }
+        } catch {
+            self.error = error.localizedDescription
+        }
         await refresh()
     }
 
-    func runReconcile() async {
-        isLoading = true
-        lastError = nil
-        do {
-            _ = try await service.runReconcile(includeCCSwitch: includeCCSwitch)
-            config = try await service.getConfig()
-            report = try await service.runDoctor(includeCCSwitch: includeCCSwitch)
-            agents = try await service.getAgents()
-            clis = try await service.getCLIs()
-            skillReport = try await service.getSkills()
-            lastRefresh = Date()
-        } catch {
-            lastError = error.localizedDescription
-        }
-        isLoading = false
+    func sync() async { await perform({}) }
+
+    func setMode(_ server: MCPServer, _ mode: MCPMode) async {
+        await perform { try await self.service.setMode(id: server.id, mode: mode) }
     }
 
-    func setSecret(name: String, value: String) async -> Bool {
-        isLoading = true
-        lastError = nil
-        do {
-            try await service.setSecret(name: name, value: value)
-            report = try await service.runDoctor(includeCCSwitch: includeCCSwitch)
-            lastRefresh = Date()
-            isLoading = false
-            return true
-        } catch {
-            lastError = error.localizedDescription
-            isLoading = false
-            return false
-        }
+    func save(_ draft: MCPDraft) async { await perform { try await self.service.saveMCP(draft) } }
+    func remove(_ server: MCPServer) async { await perform { try await self.service.removeMCP(id: server.id) } }
+    func importMCPs() async { await perform { try await self.service.importMCPs() } }
+
+    func disableSkills(_ names: [String], profile: String) async {
+        await perform({ try await self.service.disableSkills(names, profile: profile) }, reconcile: false)
+        await loadUsage()
     }
 
-    func revealSecret(name: String) async -> String? {
-        lastError = nil
+    func setSecret(_ name: String, _ value: String) async {
+        await perform({ try await self.service.setSecret(name: name, value: value) }, reconcile: false)
+    }
+
+    func deleteSecret(_ name: String) async {
+        await perform({ try await self.service.deleteSecret(name: name) }, reconcile: false)
+    }
+
+    private func attempt<T>(_ body: @escaping () async throws -> T) async -> T? {
         do {
-            return try await service.revealSecret(name: name)
+            return try await body()
         } catch {
-            lastError = error.localizedDescription
+            self.error = error.localizedDescription
             return nil
         }
     }
 
-    func deleteSecret(name: String) async -> Bool {
-        isLoading = true
-        lastError = nil
-        do {
-            try await service.deleteSecret(name: name)
-            report = try await service.runDoctor(includeCCSwitch: includeCCSwitch)
-            lastRefresh = Date()
-            isLoading = false
-            return true
-        } catch {
-            lastError = error.localizedDescription
-            isLoading = false
-            return false
-        }
+    /// MCP ids that need each secret name.
+    func consumers(of name: String) -> [String] {
+        mcps.filter { $0.enabled && $0.requiredSecrets.contains(name) }.map(\.shortName)
     }
 
-    func updateSkills() async -> Bool {
-        isLoading = true
-        lastError = nil
-        do {
-            skillReport = try await service.updateSkills()
-            lastRefresh = Date()
-            isLoading = false
-            return true
-        } catch {
-            lastError = error.localizedDescription
-            isLoading = false
-            return false
-        }
-    }
-
-    func saveMCP(
-        id: String,
-        name: String,
-        command: String,
-        args: [String],
-        secrets: [String],
-        env: [String: String],
-        apps: AppFlags,
-        description: String?,
-        enabled: Bool
-    ) async -> Bool {
-        isLoading = true
-        lastError = nil
-        do {
-            try await service.saveMCP(
-                id: id,
-                name: name,
-                command: command,
-                args: args,
-                secrets: secrets,
-                env: env,
-                apps: apps,
-                description: description,
-                enabled: enabled
-            )
-            isLoading = false
-            await refresh()
-            return true
-        } catch {
-            lastError = error.localizedDescription
-            isLoading = false
-            return false
-        }
-    }
-
-    func removeMCP(id: String) async -> Bool {
-        isLoading = true
-        lastError = nil
-        do {
-            try await service.removeMCP(id: id)
-            isLoading = false
-            await refresh()
-            return true
-        } catch {
-            lastError = error.localizedDescription
-            isLoading = false
-            return false
-        }
-    }
-
-    func setMCPEnabled(id: String, enabled: Bool) async -> Bool {
-        isLoading = true
-        lastError = nil
-        do {
-            try await service.setMCPEnabled(id: id, enabled: enabled)
-            isLoading = false
-            await refresh()
-            return true
-        } catch {
-            lastError = error.localizedDescription
-            isLoading = false
-            return false
-        }
-    }
-
-    func importMCPs() async -> Bool {
-        isLoading = true
-        lastError = nil
-        do {
-            try await service.importMCPs(includeCCSwitch: includeCCSwitch)
-            isLoading = false
-            await refresh()
-            return true
-        } catch {
-            lastError = error.localizedDescription
-            isLoading = false
-            return false
-        }
-    }
-
-    func previewMCPImport() async -> Bool {
-        isLoading = true
-        lastError = nil
-        do {
-            importPreview = try await service.previewMCPImport()
-            isLoading = false
-            return true
-        } catch {
-            importPreview = nil
-            lastError = error.localizedDescription
-            isLoading = false
-            return false
-        }
-    }
+    var missingSecrets: [String] { doctor?.secrets.missing ?? [] }
 }

@@ -1,6 +1,37 @@
 # Changelog
 
-All notable changes to Agent Switch are documented here.
+All notable changes to Fusebox (formerly Agent Switch) are documented here.
+
+## 0.4.0 - 2026-10-26
+
+Renamed to **Fusebox** and rewritten in Rust as a single binary.
+
+### Added
+
+- Two states for every MCP server and Skill: resident or on demand (the default).
+- `agent-hub`: one lazy MCP proxy per agent; servers start on first call with
+  only their own secrets and stop when idle. Large servers are listed by name.
+- `fusebox find`: one ranked catalog of Skills and MCP servers (BM25, zh/en
+  synonyms, per-Skill aliases, usage prior), cached for sub-10 ms lookups.
+- Claude Code `name-only` projection with a one-line description for the 30
+  most used on-demand Skills; the same list for Codex and DeepSeek Harness.
+- DeepSeek Harness as a managed agent.
+- Usage from Claude Code, Codex and DeepSeek Harness transcripts;
+  `fusebox advise` with exact commands, including a drop-off alert.
+- `fusebox eval` to score discovery on your own sessions.
+- `skills add-source`, `drop` / `restore`; the Skill Hub defaults to
+  `~/.config/fusebox/skill-hub` and is created on first use.
+- Redesigned bilingual macOS app with in-app language switch; the CLI ships
+  inside the app bundle.
+
+### Changed
+
+- Config moves to `~/.config/fusebox` (the old `~/.config/agent-switch` is
+  still read). `agent-switch` can stay as a symlink to `fusebox`.
+
+### Removed
+
+- The Python implementation and the CC Switch import.
 
 ## 0.3.0 - 2026-08-11
 

@@ -1,30 +1,18 @@
 # Roadmap
 
-Agent Switch's product goal is one control plane for MCP definitions and static
-credential values across local AI agents. The project documents incomplete
-boundaries explicitly instead of treating a successful demo as a finished
-distribution.
+Fusebox 0.4 is the Rust rewrite: one binary, two states (resident or on
+demand) for every MCP server and Skill, a lazy MCP hub, one catalog with
+`fusebox find`, usage-based `advise`, and `eval` to measure discovery.
 
-## 0.2 foundation
+Next, roughly in order:
 
-- Neutral first run with no maintainer-specific MCPs or credentials.
-- Central lifecycle for user-level command/stdio MCPs.
-- Explicit import preview and backed-up adoption from supported agents.
-- One private credential store with per-MCP least-privilege wrappers.
-- Detected-target-only reconciliation, strict health checks, CI, and package
-  build validation.
+1. Developer ID signing and notarization for the app, then drop the cask's
+   quarantine removal.
+2. Remote (Streamable HTTP / SSE) MCP servers behind the hub, with OAuth left
+   to the server.
+3. Codex: use its own on-demand Skill switches once they can list names without
+   descriptions.
+4. Per-project usage priors in agents' name lists, not only in `find`.
+5. A first-run wizard in the app that previews every file it will touch.
 
-## Before stable 1.0
-
-1. Normalize native Streamable HTTP and SSE MCP definitions without losing
-   client-specific OAuth behavior; migrate static header credentials without
-   printing or duplicating their values.
-2. Discover project/local MCP scopes separately from user scope and require an
-   explicit ownership choice before adoption.
-3. Add adapters through a documented contract and fixture suite rather than
-   guessing unknown agent configuration formats.
-4. Replace the current ad-hoc signed Homebrew alpha with a Developer ID-signed
-   and notarized release, then remove the Cask's Gatekeeper-quarantine bypass.
-5. Add complete English and Chinese localization plus a first-run wizard that
-   previews targets, MCP IDs, and secret names before any write.
-6. Add a first-class backup browser and guided restore flow.
+Ideas and bug reports: open an issue.

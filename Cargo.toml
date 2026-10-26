@@ -1,0 +1,25 @@
+[package]
+name = "fusebox"
+version = "0.4.0"
+edition = "2024"
+description = "On-demand MCP servers and Skills for Claude Code, Codex and other AI agents, with one secret store and one catalog."
+license = "MIT"
+repository = "https://github.com/risingjerry/fusebox"
+rust-version = "1.89"
+
+[[bin]]
+name = "fusebox"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = { version = "1", features = ["preserve_order", "arbitrary_precision"] }
+regex-lite = "0.1"
+ruzstd = { version = "0.8", default-features = false, features = ["std"] }
+toml = { version = "0.9", default-features = false, features = ["parse", "serde"] }
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true

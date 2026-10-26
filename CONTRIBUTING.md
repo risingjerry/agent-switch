@@ -1,20 +1,20 @@
 # Contributing
 
-Agent Switch manages security-sensitive local configuration. Changes should be
+Fusebox manages security-sensitive local configuration. Changes should be
 small, testable, and preserve unrelated native configuration.
 
 ## Development
 
 ```bash
-python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install -e .
-PYTHONPATH=src python -m unittest discover -s tests
-PYTHONPATH=src python -m unittest discover -s tests/integration
+cargo fmt --check
+cargo clippy --release --all-targets --locked -- -D warnings
+cargo test --release --locked
 swift build --package-path macos-app/AgentSwitch
 python3 scripts/privacy_scan.py
-zsh -n scripts/install.sh
 ```
+
+Changed how `find` ranks, the catalog, or aliases? Run `fusebox eval` before
+and after and put both numbers in the pull request.
 
 ## Required boundaries
 

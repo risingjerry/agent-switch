@@ -1,74 +1,46 @@
-# Agent Switch macOS App — CLAUDE.md
+# Fusebox macOS App — CLAUDE.md
 
 ## Architecture
 
-SwiftUI-first macOS 14+ application. Communicates with the Python `agent-switch` CLI backend via `Process` shell execution and JSON parsing.
+Native SwiftUI app (macOS 14+). All data comes from the Rust `fusebox`
+binary: `AgentSwitchService` runs it with `--json` and decodes the output into
+`Models/AgentModels.swift`. The app never reads or writes secrets itself;
+`secret set` goes through stdin and `secret get` through a private FIFO bound
+to fd 3. Every write is followed by `fusebox reconcile`.
+
+UI text is bilingual: `Resources/L10n.swift` holds every string as
+`t("English", "中文")`. The language follows macOS on first launch and can be
+overridden in Settings (stored as `language` = `system` | `zh` | `en`).
 
 ## Directory Structure
 
 ```
-macos-app/AgentSwitch/
-├── Package.swift                      # SPM build manifest
-├── AgentSwitch.xcodeproj/             # Xcode project (alternative build)
-└── AgentSwitch/
-    ├── AgentSwitchApp.swift           # App entry, Scene, menu commands
-    ├── ContentView.swift              # Root NavigationSplitView
-    ├── DesignSystem/
-    │   ├── Tokens/DSTokens.swift      # Graphite palette, typography, spacing, radius
-    │   └── Components/DSComponents.swift  # Flat cards, badges, metrics, icon/file buttons
-    ├── Navigation/SidebarView.swift   # Sidebar enum + view
-    ├── Models/AgentModels.swift       # Codable models mirroring Python data
-    ├── Services/
-    │   ├── AgentSwitchService.swift   # Actor bridging to Python CLI
-    │   └── AppState.swift             # @MainActor observable root state
-    └── Features/
-        ├── Dashboard/DashboardView.swift
-        ├── Agents/AgentsView.swift
-        ├── CLIs/CLIsView.swift
-        ├── Skills/SkillsView.swift
-        ├── Tools/ToolsView.swift
-        ├── Secrets/SecretsView.swift
-        └── Settings/SettingsView.swift
+macos-app/AgentSwitch/AgentSwitch/
+├── AgentSwitchApp.swift              # @main App: window, Settings, ⌘1–⌘5 / ⌘R / ⇧⌘S
+├── ContentView.swift                 # NavigationSplitView + toolbar + error alert
+├── Navigation/SidebarView.swift      # Page enum, sidebar, health footer
+├── Models/AgentModels.swift          # Decodable mirrors of the CLI JSON
+├── Services/AgentSwitchService.swift # actor that runs the binary
+├── Services/AppState.swift           # @Observable state and actions
+├── DesignSystem/                     # DS tokens + Card/StatTile/Chip/StatusDot
+├── Resources/L10n.swift              # zh/en strings
+└── Features/
+    ├── Dashboard/DashboardView.swift # Overview
+    ├── Agents/AgentsView.swift       # AgentsStrip used by Overview
+    ├── Tools/ToolsView.swift         # MCP list, mode switch, editor, import
+    ├── Skills/SkillsView.swift       # usage table, library, clean-up sheet
+    ├── Secrets/SecretsView.swift     # names, consumers, add/replace/reveal
+    ├── CLIs/CLIsView.swift
+    └── Settings/SettingsView.swift
 ```
+
+The Xcode project lists files explicitly: adding a Swift file means adding it
+to `AgentSwitch.xcodeproj` as well (SwiftPM picks it up automatically).
 
 ## Build
 
 ```bash
 cd macos-app/AgentSwitch
-swift build
+swift build                     # quick compile check
+xcodebuild -project AgentSwitch.xcodeproj -scheme AgentSwitch -configuration Release build
 ```
-
-Or open `AgentSwitch.xcodeproj` in Xcode 15+.
-
-Install the current Release build into the single canonical user location used
-by the Dock entry:
-
-```bash
-./install.sh
-```
-
-The installer builds into temporary DerivedData, replaces
-`~/Applications/Agent Switch.app`, refreshes Launch Services, and launches that
-installed copy. Do not launch a DerivedData copy as the user-facing app.
-
-## Design System
-
-- All views consume `DSColor`, `DSTypography`, `DSSpacing`, `DSRadius` tokens.
-- No raw color literals in feature views.
-- Reusable product components: `DSCard`, `DSBadge`, `DSMetricCard`, `DSIconButton`, `DSPathRow`, `DSPathActions`.
-- App chrome is achromatic: no status colors or card shadows; use graphite text, gray fills, icons, and hairline borders.
-
-## Platform
-
-- macOS 14.0+ (Sonoma)
-- Swift 5.9+
-- SwiftUI with NavigationSplitView sidebar
-- No third-party dependencies
-
-## Backend Contract
-
-The app calls `python3 -m agent_switch doctor --json --no-ccswitch` (with `PYTHONPATH` set to `src/`) and decodes the resulting JSON into `DoctorReport`. Reconcile calls `reconcile --json --no-ccswitch`; supported-agent status calls `agents --json`; inventory uses `clis --json` and `skills --json`. Skill source updates call `skills update --json`, which delegates to Skill Hub `skillctl fetch` and never activates a Skill.
-
-Secret writes use `secret set --stdin`. The eye-button reveal redirects `secret get --fd 3` into a private FIFO so secret bytes never use stdout, stderr, argv, the environment, or a regular temporary file. It intentionally does not invoke Touch ID or a system password dialog; visibility remains an explicit eye-button toggle. Secret deletion uses `secret delete NAME`.
-
-Tool definitions and access routes are loaded from `~/.config/agent-switch/config.json` into `ConfigInfo`. Feature views must render MCP tools, target apps, commands, route ids, and required secret names from `ConfigInfo`, not from hardcoded defaults. `DoctorReport.secrets` is used only for runtime status such as present and missing secret names.

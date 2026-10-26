@@ -1,53 +1,23 @@
-# Agent Switch
+# Fusebox
 
-> Agent Switch is a local control plane for registering supported MCPs once and storing their static credentials once across Codex, Claude Code, Claude Desktop, and Hermes on macOS.
+> Fusebox keeps every MCP server and Skill for AI coding agents (Claude Code, Codex, DeepSeek Harness, Claude Desktop, Hermes) in one place, makes them load on demand, and stores their API keys once.
 
-Canonical repository: https://github.com/risingjerry/agent-switch
+Repository: https://github.com/risingjerry/fusebox
 License: MIT
-Platform: macOS 14+ for the native app; Python 3.11+ for the CLI
-Interface languages: English and Simplified Chinese
+Platforms: macOS 14+ (CLI and app), Linux (CLI)
+Install: `brew install risingjerry/tap/fusebox` (CLI), `brew install --cask risingjerry/tap/fusebox` (app), or `scripts/install.sh` from source.
+Formerly: Agent Switch.
 
-## Primary purpose
+## What it does
 
-Agent Switch prevents configuration drift across local AI coding agents. It centralizes agent-owned MCP definitions, loads secrets through generated runtime wrappers, synchronizes shared safety instructions, inventories local CLIs, and reads an optional Skill Hub warehouse.
+- Two states for every MCP server and Skill: resident (always loaded) or on demand (found and loaded when a task needs it).
+- `agent-hub`: one stdio MCP per agent that starts real MCP servers on first call, with only their declared secrets, and stops them when idle.
+- `fusebox find WORDS`: one ranked catalog of Skills and MCP servers, English or Chinese.
+- Writes each agent's native config from one registry; manages only `agent-*` MCP entries and its own marked instruction blocks; backs up every file it changes.
+- `fusebox skills usage`, `fusebox advise`, `fusebox eval`: usage from session transcripts, suggested changes as commands, and a discovery benchmark on your own sessions.
 
-## Important guarantees
+## For agents
 
-- It manages only MCP IDs in the `agent-*` namespace.
-- It preserves unrelated MCP entries and provider settings.
-- Secret values remain in `~/.config/agent-switch/secrets.env` and are not embedded in generated app configuration.
-- Each MCP wrapper receives only the credential names declared by that MCP.
-- New installations start with an empty MCP registry; adoption of existing native MCP entries is explicit and backed up.
-- Version 0.2 imports user-level command/stdio MCPs; remote HTTP/SSE/OAuth definitions are reported and preserved until a dedicated adapter is available.
-- Diagnostics list secret names only.
-- Downloaded Skills are dormant until explicitly activated for a project or the global profile.
-- Skill source updates never activate Skills.
-- The native interface is localized in English and Simplified Chinese and follows the macOS language preference.
-- `doctor` previews and validates; `reconcile` writes atomically and creates backups.
-
-## Supported integrations
-
-- Codex: MCP configuration and shared AGENTS.md policy
-- Claude Code: MCP configuration and shared CLAUDE.md managed block
-- Claude Desktop: MCP configuration
-- Hermes: MCP configuration and shared SOUL.md managed block
-- CC Switch: optional `agent-*` MCP database mirror; provider switching remains owned by CC Switch
-- Skill Hub: optional source, lock, warehouse, and activation-profile inventory
-
-## Installation
-
-Give a local coding agent the installation prompt at the top of README.md, or follow the manual installation section.
-
-## MCP management
-
-- `agent-switch mcp import --dry-run --json`: inventory native MCPs without mutation
-- `agent-switch mcp import --adopt`: migrate and centrally manage existing MCPs
-- `agent-switch mcp add|set|enable|disable|remove|list`: manage the registry lifecycle
-
-## Documentation
-
-- README: https://github.com/risingjerry/agent-switch#readme
-- Secrets and wrappers: https://github.com/risingjerry/agent-switch/blob/main/docs/secrets-and-wrappers.md
-- Recovery: https://github.com/risingjerry/agent-switch/blob/main/docs/recovery.md
-- CC Switch compatibility: https://github.com/risingjerry/agent-switch/blob/main/docs/ccswitch-compat.md
-- Security: https://github.com/risingjerry/agent-switch/blob/main/SECURITY.md
+- Bundled skill: `skills/fusebox/SKILL.md` (`npx skills add risingjerry/fusebox`).
+- Repository guide: `AGENTS.md`.
+- Every read command takes `--json`. Secret values are written via stdin or a file descriptor, never arguments, and are never printed.

@@ -1,89 +1,38 @@
-// [INPUT]: SwiftUI, AppState, CLIInfo, shared design system
-// [OUTPUT]: Installed CLI inventory with live versions and file actions
-// [POS]: Features/CLIs — visible local command-line tool control surface
+// [INPUT]: SwiftUI, AppState, CLIInfo
+// [OUTPUT]: CLIsView — installed command-line tools and their versions
+// [POS]: Features/CLIs — the CLIs page
 // [PROTOCOL]: When this file changes, update this header, then check CLAUDE.md
 
 import SwiftUI
 
 struct CLIsView: View {
-    @EnvironmentObject var appState: AppState
-
-    private var installed: [CLIInfo] { appState.clis.filter(\.installed) }
+    @Environment(AppState.self) private var state
 
     var body: some View {
-        DSPage(
-            title: L10n.cliManagement,
-            subtitle: L10n.cliManagementSubtitle,
-            badges: [
-                DSPageBadge(text: "\(installed.count)/\(appState.clis.count) \(L10n.installed)", tone: .good),
-            ]
-        ) {
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: DSSpacing.md), count: 3), spacing: DSSpacing.md) {
-                DSMetricCard(label: L10n.installedCLIs, value: "\(installed.count)", note: L10n.cliManagementSubtitle)
-                DSMetricCard(label: L10n.notInstalled, value: "\(appState.clis.count - installed.count)", note: L10n.cliInventory)
-                DSMetricCard(label: L10n.version, value: "\(installed.filter { $0.version != nil }.count)", note: L10n.cliUpdateNote)
-            }
-
-            DSCard {
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(L10n.cliInventory)
-                        .font(DSTypography.heading)
-                        .padding(.bottom, DSSpacing.md)
-
-                    ForEach(Array(appState.clis.enumerated()), id: \.element.id) { index, cli in
-                        CLIRow(cli: cli)
-                        if index < appState.clis.count - 1 {
-                            Divider().overlay(DSColor.separator)
-                        }
-                    }
+        Table(state.clis.sorted { ($0.installed ? 0 : 1, $0.name) < ($1.installed ? 0 : 1, $1.name) }) {
+            TableColumn(L10n.clis) { cli in
+                HStack(spacing: DS.gap) {
+                    StatusDot(color: cli.installed ? DS.good : DS.quiet)
+                    Text(cli.name).foregroundStyle(cli.installed ? .primary : .secondary)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
-
-            Text(L10n.cliUpdateNote)
-                .font(DSTypography.caption)
-                .foregroundStyle(DSColor.textMuted)
+            .width(min: 140, ideal: 170)
+            TableColumn(L10n.version) { cli in
+                Text(cli.version ?? (cli.installed ? "—" : L10n.notInstalled))
+                    .foregroundStyle(.secondary).lineLimit(1)
+            }
+            .width(min: 160, ideal: 260)
+            TableColumn(L10n.path) { cli in
+                Text(cli.path.map(DS.tilde) ?? "")
+                    .font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+            }
+            TableColumn(L10n.t("Installed via", "安装方式")) { cli in
+                Text(cli.manager).foregroundStyle(.secondary)
+            }
+            .width(min: 110, ideal: 140)
         }
-    }
-}
-
-private struct CLIRow: View {
-    let cli: CLIInfo
-
-    var body: some View {
-        HStack(alignment: .center, spacing: DSSpacing.lg) {
-            Image(systemName: "terminal")
-                .font(.system(size: 16))
-                .foregroundStyle(cli.installed ? DSColor.textPrimary : DSColor.textMuted)
-                .frame(width: 22)
-
-            VStack(alignment: .leading, spacing: DSSpacing.xs) {
-                HStack(spacing: DSSpacing.sm) {
-                    Text(cli.name).font(DSTypography.heading)
-                    DSBadge(text: cli.installed ? L10n.installed : L10n.notInstalled, tone: cli.installed ? .good : .neutral)
-                }
-                Text(cli.version ?? cli.command)
-                    .font(DSTypography.mono)
-                    .foregroundStyle(cli.installed ? DSColor.textSecondary : DSColor.textMuted)
-                    .lineLimit(1)
-                Text("\(L10n.packageManager)：\(cli.manager)")
-                    .font(DSTypography.caption)
-                    .foregroundStyle(DSColor.textMuted)
-            }
-
-            Spacer()
-
-            if let path = cli.path {
-                Text(path)
-                    .font(DSTypography.mono)
-                    .foregroundStyle(DSColor.textSecondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .frame(maxWidth: 360, alignment: .trailing)
-                    .textSelection(.enabled)
-                DSPathActions(path: path)
-            }
-        }
-        .padding(.vertical, DSSpacing.compact)
+        .navigationTitle(L10n.clis)
+        .overlay { if state.clis.isEmpty { ProgressView() } }
+        .task { if state.clis.isEmpty { await state.loadCLIs() } }
     }
 }

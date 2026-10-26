@@ -1,326 +1,169 @@
-// [INPUT]: SwiftUI, AppKit, AppState, shared design system
-// [OUTPUT]: Local secret create, update, one-click reveal, copy, delete, and file actions
-// [POS]: Features/Secrets — operational UI over Agent Switch fd/stdin secret contracts
+// [INPUT]: SwiftUI, AppKit, AppState
+// [OUTPUT]: SecretsView — secret names, who uses them, add/replace/reveal/delete
+// [POS]: Features/Secrets — the Secrets page
 // [PROTOCOL]: When this file changes, update this header, then check CLAUDE.md
 
 import AppKit
 import SwiftUI
 
 struct SecretsView: View {
-    @EnvironmentObject var appState: AppState
-    @State private var editorName: String?
-    @State private var showingEditor = false
-    @State private var pendingDelete: String?
+    @Environment(AppState.self) private var state
+    @State private var editing: SecretDraft?
     @State private var revealed: [String: String] = [:]
+    @State private var pendingDelete: String?
+    @State private var query = ""
 
-    private var secretInfo: SecretInfo? { appState.report?.secrets }
+    private struct Item: Identifiable {
+        let name: String
+        let stored: Bool
+        var id: String { name }
+    }
 
-    private var allNames: [String] {
-        guard let info = secretInfo else { return [] }
-        return Array(Set(info.storedNames).union(info.required)).sorted()
+    private var items: [Item] {
+        let stored = Set(state.secretNames)
+        let names = stored.union(state.missingSecrets).sorted()
+        return names.filter { query.isEmpty || $0.localizedCaseInsensitiveContains(query) }
+            .map { Item(name: $0, stored: stored.contains($0)) }
     }
 
     var body: some View {
-        DSPage(title: L10n.secretsInventory, subtitle: L10n.secretManagementSubtitle, badges: pageBadges) {
-            if let error = appState.lastError {
-                DSCard {
-                    Text(error)
-                        .font(DSTypography.caption)
-                        .foregroundStyle(DSColor.textSecondary)
-                        .textSelection(.enabled)
-                }
+        let missing = items.filter { !$0.stored }
+        let inUse = items.filter { $0.stored && !state.consumers(of: $0.name).isEmpty }
+        let other = items.filter { $0.stored && state.consumers(of: $0.name).isEmpty }
+        List {
+            if !missing.isEmpty {
+                Section(L10n.missingSecrets) { ForEach(missing) { row($0) } }
             }
-
-            if let info = secretInfo {
-                summary(info)
-                secretList(info)
-                storageNote(info)
-            } else if appState.isLoading {
-                ProgressView(L10n.loadingTools)
-                    .padding(.top, DSSpacing.xxl)
-            } else {
-                emptyState
+            if !inUse.isEmpty {
+                Section(L10n.t("Used by MCP servers", "MCP 在用")) { ForEach(inUse) { row($0) } }
+            }
+            Section {
+                ForEach(other) { row($0) }
+            } header: {
+                Text(L10n.t("Other secrets · \(other.count)", "其他密钥 · \(other.count)"))
+            } footer: {
+                Text(L10n.secretsFooter).font(.callout).foregroundStyle(.secondary).padding(.top, DS.gap)
             }
         }
+        .listStyle(.inset)
+        .navigationTitle(L10n.secrets)
+        .searchable(text: $query, placement: .toolbar, prompt: L10n.search)
         .toolbar {
-            ToolbarItem {
-                Button {
-                    editorName = nil
-                    showingEditor = true
-                } label: {
-                    Label(L10n.addSecret, systemImage: "plus")
-                }
-            }
+            Button { editing = SecretDraft(name: "", isNew: true) } label: { Label(L10n.newSecret, systemImage: "plus") }
+                .help(L10n.newSecret)
         }
-        .sheet(isPresented: $showingEditor) {
-            SecretEditorSheet(existingName: editorName) { name, value in
-                await appState.setSecret(name: name, value: value)
+        .sheet(item: $editing) { draft in SecretSheet(draft: draft) }
+        .confirmationDialog(L10n.t("Delete \(pendingDelete ?? "")?", "删除 \(pendingDelete ?? "")？"),
+                            isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } })) {
+            Button(L10n.delete, role: .destructive) {
+                if let name = pendingDelete { Task { await state.deleteSecret(name) } }
             }
-        }
-        .confirmationDialog(
-            L10n.deleteSecret,
-            isPresented: Binding(
-                get: { pendingDelete != nil },
-                set: { if !$0 { pendingDelete = nil } }
-            ),
-            presenting: pendingDelete
-        ) { name in
-            Button(L10n.deleteSecret, role: .destructive) {
-                Task {
-                    _ = await appState.deleteSecret(name: name)
-                    hideSecret(name)
-                    pendingDelete = nil
-                }
-            }
-            Button(L10n.cancel, role: .cancel) { pendingDelete = nil }
-        } message: { name in
-            Text("\(L10n.deleteSecretConfirmation) \(name)")
-        }
-        .onDisappear {
-            revealed.removeAll()
         }
     }
 
-    private var pageBadges: [DSPageBadge] {
-        guard let info = secretInfo else { return [] }
-        return [
-            DSPageBadge(text: "\(info.storedNames.count) \(L10n.stored)", tone: .neutral),
-            DSPageBadge(text: info.missing.isEmpty ? L10n.ready : "\(info.missing.count) \(L10n.missing)", tone: info.missing.isEmpty ? .good : .warn),
-        ]
-    }
-
-    private func summary(_ info: SecretInfo) -> some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: DSSpacing.md), count: 3), spacing: DSSpacing.md) {
-            DSMetricCard(label: L10n.storedSecrets, value: "\(info.storedNames.count)", note: L10n.storedSecretsNote)
-            DSMetricCard(label: L10n.requiredSecrets, value: "\(info.required.count)", note: L10n.requiredSecretsNote)
-            DSMetricCard(label: L10n.missing, value: "\(info.missing.count)", note: info.missing.isEmpty ? L10n.allSecretsConfigured : info.missing.joined(separator: ", "))
-        }
-    }
-
-    private func secretList(_ info: SecretInfo) -> some View {
-        DSCard {
-            VStack(alignment: .leading, spacing: 0) {
-                HStack {
-                    Text(L10n.allSecrets)
-                        .font(DSTypography.heading)
-                    Spacer()
-                    Button(L10n.addSecret) {
-                        editorName = nil
-                        showingEditor = true
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(DSColor.textPrimary)
+    private func row(_ item: Item) -> some View {
+        let users = state.consumers(of: item.name)
+        return HStack(spacing: DS.pad) {
+            Image(systemName: item.stored ? "key.horizontal.fill" : "key.slash")
+                .foregroundStyle(item.stored ? Color.accentColor : DS.bad)
+                .frame(width: 20)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(item.name).font(.body.monospaced().weight(.medium))
+                    if !item.stored { Chip(text: L10n.missingSecrets, tint: DS.bad) }
                 }
-                .padding(.bottom, DSSpacing.md)
-
-                ForEach(Array(allNames.enumerated()), id: \.element) { index, name in
-                    secretRow(name, info: info)
-                    if index < allNames.count - 1 {
-                        Divider().overlay(DSColor.separator)
-                    }
-                }
-
-                if allNames.isEmpty {
-                    Text(L10n.noStoredSecrets)
-                        .font(DSTypography.body)
-                        .foregroundStyle(DSColor.textMuted)
-                        .padding(.vertical, DSSpacing.lg)
+                if let value = revealed[item.name] {
+                    Text(value).font(.caption.monospaced()).textSelection(.enabled).lineLimit(1).truncationMode(.middle)
+                } else if !users.isEmpty {
+                    Text("\(L10n.usedBy): \(users.joined(separator: ", "))")
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    private func secretRow(_ name: String, info: SecretInfo) -> some View {
-        let isStored = info.storedNames.contains(name)
-        let isRequired = info.required.contains(name)
-        return HStack(alignment: .center, spacing: DSSpacing.lg) {
-            Image(systemName: isStored ? "key" : "key.slash")
-                .font(.system(size: 16))
-                .foregroundStyle(isStored ? DSColor.textPrimary : DSColor.textMuted)
-                .frame(width: 22)
-
-            VStack(alignment: .leading, spacing: DSSpacing.xs) {
-                HStack(spacing: DSSpacing.sm) {
-                    Text(name)
-                        .font(DSTypography.mono)
-                    if isRequired {
-                        DSBadge(text: L10n.requiredBadge, tone: .neutral)
-                    }
-                    if !isStored {
-                        DSBadge(text: L10n.missingBadge, tone: .warn)
-                    }
-                }
-                if let value = revealed[name] {
-                    Text(value)
-                        .font(DSTypography.mono)
-                        .foregroundStyle(DSColor.textPrimary)
-                        .textSelection(.enabled)
-                        .lineLimit(2)
-                } else {
-                    Text(isStored ? "••••••••••••" : L10n.notConfigured)
-                        .font(DSTypography.caption)
-                        .foregroundStyle(DSColor.textMuted)
-                }
-                if let consumers = info.consumers?[name], !consumers.isEmpty {
-                    Text("\(L10n.usedByMCP): \(consumers.joined(separator: ", "))")
-                        .font(DSTypography.caption)
-                        .foregroundStyle(DSColor.textMuted)
-                        .lineLimit(2)
-                }
-            }
-
             Spacer()
-
-            DSIconButton(
-                systemName: revealed[name] == nil ? "eye" : "eye.slash",
-                help: revealed[name] == nil ? L10n.revealSecret : L10n.hideSecret,
-                disabled: !isStored
-            ) {
-                if revealed[name] == nil {
-                    revealSecret(name)
-                } else {
-                    hideSecret(name)
+            if item.stored {
+                Menu {
+                    Button(L10n.reveal) { Task { await reveal(item.name) } }
+                    Button(L10n.copy) { Task { await copy(item.name) } }
+                    Button(L10n.replace) { editing = SecretDraft(name: item.name, isNew: false) }
+                    Divider()
+                    Button(L10n.delete, role: .destructive) { pendingDelete = item.name }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
                 }
-            }
-
-            DSIconButton(systemName: "doc.on.doc", help: L10n.copySecret, disabled: revealed[name] == nil) {
-                if let value = revealed[name] { copySecret(value) }
-            }
-
-            DSIconButton(systemName: "pencil", help: isStored ? L10n.updateSecret : L10n.configureSecret) {
-                editorName = name
-                showingEditor = true
-            }
-
-            DSIconButton(systemName: "trash", help: L10n.deleteSecret, disabled: !isStored) {
-                pendingDelete = name
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+            } else {
+                Button(L10n.add) { editing = SecretDraft(name: item.name, isNew: false) }
             }
         }
-        .padding(.vertical, DSSpacing.compact)
+        .padding(.vertical, 3)
     }
 
-    private func storageNote(_ info: SecretInfo) -> some View {
-        DSCard {
-            VStack(alignment: .leading, spacing: DSSpacing.md) {
-                Text(L10n.secretFileLocation).font(DSTypography.heading)
-                DSPathRow(label: L10n.secretFile, path: info.path)
-                Text(L10n.secretsRuntimeNote)
-                    .font(DSTypography.caption)
-                    .foregroundStyle(DSColor.textMuted)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+    private func reveal(_ name: String) async {
+        do {
+            revealed[name] = try await state.service.revealSecret(name: name)
+            try? await Task.sleep(for: .seconds(10))
+            revealed[name] = nil
+        } catch {
+            state.error = error.localizedDescription
         }
     }
 
-    private var emptyState: some View {
-        VStack(spacing: DSSpacing.md) {
-            Image(systemName: "key.slash")
-                .font(.system(size: 24))
-                .foregroundStyle(DSColor.textMuted)
-            Text(L10n.noSecretInfo).font(DSTypography.body)
-            Text(L10n.runDoctorForSecrets)
-                .font(DSTypography.caption)
-                .foregroundStyle(DSColor.textMuted)
+    private func copy(_ name: String) async {
+        do {
+            let value = try await state.service.revealSecret(name: name)
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(value, forType: .string)
+        } catch {
+            state.error = error.localizedDescription
         }
-        .frame(maxWidth: .infinity)
-        .padding(.top, DSSpacing.xxl)
-    }
-
-    private func revealSecret(_ name: String) {
-        Task {
-            guard let value = await appState.revealSecret(name: name) else { return }
-            revealed[name] = value
-        }
-    }
-
-    private func hideSecret(_ name: String) {
-        revealed.removeValue(forKey: name)
-    }
-
-    private func copySecret(_ value: String) {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(value, forType: .string)
     }
 }
 
-private struct SecretEditorSheet: View {
-    @Environment(\.dismiss) private var dismiss
-    let existingName: String?
-    let onSave: (String, String) async -> Bool
-    @State private var name = ""
-    @State private var value = ""
-    @State private var saving = false
-    @State private var showingValue = false
+private struct SecretDraft: Identifiable {
+    var name: String
+    let isNew: Bool
+    var id: String { isNew ? "__new__" : name }
+}
 
-    private var normalizedName: String { (existingName ?? name).trimmingCharacters(in: .whitespacesAndNewlines).uppercased() }
-    private var nameIsValid: Bool { normalizedName.range(of: "^[A-Z][A-Z0-9_]*$", options: .regularExpression) != nil }
+private struct SecretSheet: View {
+    @Environment(AppState.self) private var state
+    @Environment(\.dismiss) private var dismiss
+    @State var draft: SecretDraft
+    @State private var value = ""
+
+    private var validName: Bool {
+        draft.name.range(of: "^[A-Z][A-Z0-9_]*$", options: .regularExpression) != nil
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: DSSpacing.xxl) {
-            VStack(alignment: .leading, spacing: DSSpacing.md) {
-                Text(existingName == nil ? L10n.addSecret : L10n.updateSecret)
-                    .font(DSTypography.title)
-                Text(L10n.secretEditorNote)
-                    .font(DSTypography.caption)
-                    .foregroundStyle(DSColor.textSecondary)
-            }
-
-            VStack(alignment: .leading, spacing: DSSpacing.md) {
-                if let existingName {
-                    VStack(alignment: .leading, spacing: DSSpacing.xs) {
-                        Text(L10n.secretNameLabel)
-                            .font(DSTypography.caption)
-                            .foregroundStyle(DSColor.textMuted)
-                        Text(existingName)
-                            .font(DSTypography.mono)
-                            .foregroundStyle(DSColor.textPrimary)
-                            .textSelection(.enabled)
-                    }
-                } else {
-                    TextField(L10n.secretName, text: $name)
-                        .textFieldStyle(.roundedBorder)
+        VStack(alignment: .leading, spacing: DS.pad) {
+            Text(draft.isNew ? L10n.newSecret : draft.name).font(.title2.weight(.semibold))
+            Form {
+                if draft.isNew {
+                    TextField(L10n.secretName, text: $draft.name)
+                        .font(DS.mono)
+                        .onChange(of: draft.name) { _, v in draft.name = v.uppercased() }
                 }
-                HStack(spacing: DSSpacing.sm) {
-                    Group {
-                        if showingValue {
-                            TextField(L10n.secretValue, text: $value)
-                        } else {
-                            SecureField(L10n.secretValue, text: $value)
-                        }
-                    }
-                    .textFieldStyle(.roundedBorder)
-                    DSIconButton(
-                        systemName: showingValue ? "eye.slash" : "eye",
-                        help: showingValue ? L10n.hideSecret : L10n.revealSecret
-                    ) {
-                        showingValue.toggle()
-                    }
-                }
+                SecureField(L10n.secretValue, text: $value)
+                    .font(DS.mono)
             }
-            .onAppear { name = existingName ?? "" }
-
-            Divider().overlay(DSColor.separator)
-
+            .formStyle(.grouped)
             HStack {
-                Button(L10n.cancel) { dismiss() }
-                    .buttonStyle(.plain)
                 Spacer()
-                Button(existingName == nil ? L10n.addSecret : L10n.updateSecret) {
-                    saving = true
-                    Task {
-                        if await onSave(normalizedName, value) { dismiss() }
-                        saving = false
-                    }
+                Button(L10n.cancel) { dismiss() }
+                Button(L10n.save) {
+                    let (name, secret) = (draft.name, value)
+                    value = ""
+                    dismiss()
+                    Task { await state.setSecret(name, secret) }
                 }
-                .buttonStyle(.bordered)
-                .tint(DSColor.textPrimary)
-                .disabled(!nameIsValid || value.isEmpty || saving)
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+                .disabled(!validName || value.isEmpty || value.contains("\n"))
             }
         }
-        .padding(DSSpacing.xxl)
-        .frame(width: 500)
-        .background(DSColor.background)
+        .padding(DS.page)
+        .frame(width: 460)
     }
 }

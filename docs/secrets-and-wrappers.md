@@ -1,6 +1,6 @@
 # Secrets And Wrappers
 
-Agent Switch keeps secrets out of generated app configs by using wrapper commands.
+Fusebox keeps secrets out of generated app configs by using wrapper commands.
 
 Native app configs and CC Switch rows contain:
 
@@ -19,7 +19,7 @@ They do not contain:
 Default path:
 
 ```bash
-~/.config/agent-switch/secrets.env
+~/.config/fusebox/secrets.env
 ```
 
 Example shape (names vary with the MCP registry):
@@ -34,14 +34,14 @@ The status output reports missing secret names only. It never prints values.
 Use the CLI to add or update secrets:
 
 ```bash
-secret-producing-command | agent-switch secret set --stdin FIRECRAWL_API_KEY
-agent-switch secret set --fd 3 FIRECRAWL_API_KEY 3< <(secret-producing-command)
-agent-switch secret get --fd 3 FIRECRAWL_API_KEY 3> >(secret-consuming-command)
-agent-switch secret list
-agent-switch secret delete FIRECRAWL_API_KEY
+secret-producing-command | fusebox secret set --stdin FIRECRAWL_API_KEY
+fusebox secret set --fd 3 FIRECRAWL_API_KEY 3< <(secret-producing-command)
+fusebox secret get --fd 3 FIRECRAWL_API_KEY 3> >(secret-consuming-command)
+fusebox secret list
+fusebox secret delete FIRECRAWL_API_KEY
 ```
 
-`--stdin` and `--fd` keep the value out of the Agent Switch process arguments.
+`--stdin` and `--fd` keep the value out of the Fusebox process arguments.
 Replace `secret-producing-command` with a program that emits the value; never
 replace that placeholder with the value itself. Positional secret values are
 rejected so they cannot enter process arguments or shell history.
@@ -81,22 +81,22 @@ directly:
 Managed files:
 
 ```text
-~/.config/agent-switch/instructions/AGENTS.md
-~/.config/agent-switch/instructions/CLAUDE.md
-~/.config/agent-switch/instructions/HERMES.md
+~/.config/fusebox/instructions/AGENTS.md
+~/.config/fusebox/instructions/CLAUDE.md
+~/.config/fusebox/instructions/HERMES.md
 ```
 
 Native app integration:
 
-- Codex: `~/.codex/config.toml` points `model_instructions_file` at the Agent Switch `AGENTS.md`.
-- Claude Code: `~/.claude/CLAUDE.md` receives a managed Agent Switch block.
-- Hermes: `~/.hermes/SOUL.md` receives a managed Agent Switch block.
+- Codex: `~/.codex/config.toml` points `model_instructions_file` at the Fusebox `AGENTS.md`.
+- Claude Code: `~/.claude/CLAUDE.md` receives a managed Fusebox block.
+- Hermes: `~/.hermes/SOUL.md` receives a managed Fusebox block.
 
 These instructions are policy only. The source of truth remains `secrets.env`, wrapper scripts, and generated native MCP config.
 
-Run `agent-switch agents --json` to inspect detection, instruction enrollment,
+Run `fusebox agents --json` to inspect detection, instruction enrollment,
 and synchronization status for the currently supported targets: Codex, Claude
-Code, and Hermes. A future agent needs its own adapter before Agent Switch can
+Code, and Hermes. A future agent needs its own adapter before Fusebox can
 manage it safely.
 
 ## Wrapper Behavior

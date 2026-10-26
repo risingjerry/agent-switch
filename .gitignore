@@ -19,3 +19,6 @@ build/
 !*.env.example
 secrets.env
 backups/
+
+# Rust build output
+/target/
