@@ -8,6 +8,14 @@ import SwiftUI
 /// The app leans on native macOS materials and system colours so it follows
 /// light/dark mode, accent colour and accessibility settings for free.
 enum DS {
+    /// `~/…` for paths under the home the CLI runs with ($HOME), so a
+    /// demo or custom home reads the same as the real one.
+    static func tilde(_ path: String) -> String {
+        let home = ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory()
+        if path == home { return "~" }
+        return path.hasPrefix(home + "/") ? "~" + path.dropFirst(home.count) : (path as NSString).abbreviatingWithTildeInPath
+    }
+
     static let gap: CGFloat = 8
     static let pad: CGFloat = 16
     static let page: CGFloat = 24

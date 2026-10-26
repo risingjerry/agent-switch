@@ -433,15 +433,15 @@ mod tests {
     #[test]
     fn scans_claude_skill_and_read_calls() {
         let log = concat!(
-            r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"explore-map","args":"x"}}]}}"#,
+            r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"pdf-tools","args":"x"}}]}}"#,
             "\n",
-            r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"/a/skills/unified-search/SKILL.md"}}]}}"#,
+            r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"/a/skills/release-notes/SKILL.md"}}]}}"#,
             "\n",
             r#"{"type":"user","message":{"content":"see /x/other/SKILL.md"}}"#,
             "\n"
         );
         let found = scan_file(Agent::Claude, log.as_bytes());
-        assert_eq!(found.into_iter().collect::<Vec<_>>(), vec!["explore-map", "unified-search"]);
+        assert_eq!(found.into_iter().collect::<Vec<_>>(), vec!["pdf-tools", "release-notes"]);
     }
 
     #[test]
@@ -449,20 +449,20 @@ mod tests {
         let log = concat!(
             r#"{"type":"session_meta","payload":{"instructions":"- a: x (file: r0/listed/SKILL.md)"}}"#,
             "\n",
-            r#"{"type":"response_item","payload":{"type":"function_call","name":"exec","arguments":"{\"cmd\":\"sed -n 1,80p /s/skills/wechat-native/SKILL.md\"}"}}"#,
+            r#"{"type":"response_item","payload":{"type":"function_call","name":"exec","arguments":"{\"cmd\":\"sed -n 1,80p /s/skills/slide-deck/SKILL.md\"}"}}"#,
             "\n"
         );
         let found = scan_file(Agent::Codex, log.as_bytes());
-        assert_eq!(found.into_iter().collect::<Vec<_>>(), vec!["wechat-native"]);
+        assert_eq!(found.into_iter().collect::<Vec<_>>(), vec!["slide-deck"]);
     }
 
     #[test]
     fn counts_mcp_servers_per_agent() {
-        let claude = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"mcp__agent-iphone12__pua_tap","input":{}},{"type":"tool_use","id":"t2","name":"mcp__agent-hub__rea__open_binary","input":{}}]}}"#;
+        let claude = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"mcp__agent-browser__click","input":{}},{"type":"tool_use","id":"t2","name":"mcp__agent-hub__github__search","input":{}}]}}"#;
         let found = scan_file(Agent::Claude, claude.as_bytes());
-        assert!(found.contains("mcp:agent-iphone12") && found.contains("mcp:agent-hub/rea"));
-        let codex = r#"{"type":"event_msg","payload":{"type":"mcp_tool_call_end","invocation":{"server":"agent-rea","tool":"open_binary"}}}"#;
-        assert!(scan_file(Agent::Codex, codex.as_bytes()).contains("mcp:agent-rea"));
+        assert!(found.contains("mcp:agent-browser") && found.contains("mcp:agent-hub/github"));
+        let codex = r#"{"type":"event_msg","payload":{"type":"mcp_tool_call_end","invocation":{"server":"agent-github","tool":"search_code"}}}"#;
+        assert!(scan_file(Agent::Codex, codex.as_bytes()).contains("mcp:agent-github"));
     }
 
     #[test]

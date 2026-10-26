@@ -23,7 +23,7 @@ struct CLIsView: View {
             }
             .width(min: 160, ideal: 260)
             TableColumn(L10n.path) { cli in
-                Text(cli.path.map { ($0 as NSString).abbreviatingWithTildeInPath } ?? "")
+                Text(cli.path.map(DS.tilde) ?? "")
                     .font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
             }
             TableColumn(L10n.t("Installed via", "安装方式")) { cli in

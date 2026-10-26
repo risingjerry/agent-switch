@@ -1,18 +1,18 @@
 cff-version: 1.2.0
-message: "If Agent Switch supports your work, please cite the software using these metadata."
-title: "Agent Switch"
+message: "If Fusebox supports your work, please cite it using these metadata."
+title: "Fusebox"
 type: software
 authors:
-  - name: "JNHFlow21"
-repository-code: "https://github.com/JNHFlow21/agent-switch"
-url: "https://github.com/JNHFlow21/agent-switch"
+  - name: "risingjerry"
+repository-code: "https://github.com/risingjerry/fusebox"
+url: "https://github.com/risingjerry/fusebox"
 license: MIT
-version: 0.3.0
-date-released: 2026-08-11
+version: 0.4.0
+date-released: 2026-10-26
 keywords:
   - MCP
-  - macOS
+  - Agent Skills
+  - Claude Code
+  - Codex
   - AI agents
   - secret management
-  - Codex
-  - Claude Code

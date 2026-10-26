@@ -939,10 +939,24 @@ pub struct Bm25 {
     avg_text: f64,
 }
 
+/// Light English stemming so "screenshots" matches "screenshot" and
+/// "deploying" matches "deploy".
+fn stem(word: &str) -> String {
+    for suffix in ["ing", "ies", "es", "ed", "s"] {
+        if let Some(base) = word.strip_suffix(suffix)
+            && base.len() >= 3
+            && !(suffix == "s" && base.ends_with('s'))
+        {
+            return if suffix == "ies" { format!("{base}y") } else { base.to_string() };
+        }
+    }
+    word.to_string()
+}
+
 fn tokens(text: &str) -> Vec<String> {
     let lower = text.to_lowercase();
     let mut out: Vec<String> =
-        lower.split(|c: char| !c.is_ascii_alphanumeric()).filter(|w| w.len() >= 2).map(String::from).collect();
+        lower.split(|c: char| !c.is_ascii_alphanumeric()).filter(|w| w.len() >= 2).map(stem).collect();
     let mut run: Vec<char> = Vec::new();
     let flush = |run: &mut Vec<char>, out: &mut Vec<String>| {
         if run.len() == 1 {
@@ -1008,6 +1022,15 @@ impl Bm25 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stems_plurals_and_verb_forms() {
+        assert_eq!(stem("screenshots"), "screenshot");
+        assert_eq!(stem("deploying"), "deploy");
+        assert_eq!(stem("queries"), "query");
+        assert_eq!(stem("class"), "class");
+        assert_eq!(stem("is"), "is");
+    }
 
     #[test]
     fn civil_dates() {

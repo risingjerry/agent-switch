@@ -1,0 +1,11 @@
+name: Feature request
+description: An agent, MCP setup or workflow Fusebox should support
+labels: [enhancement]
+body:
+  - type: textarea
+    attributes:
+      label: What are you trying to do?
+    validations: {required: true}
+  - type: textarea
+    attributes:
+      label: What would good look like?

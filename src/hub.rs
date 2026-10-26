@@ -489,7 +489,7 @@ fn meta_tools() -> Vec<Value> {
             "name": "fusebox_servers",
             "description": "List the on-demand MCP servers Fusebox can start for you, with their tools. Pass `server` to start one and get its tool list (names, descriptions, input schemas; large servers list names only — add `tool` for one schema).",
             "inputSchema": {"type": "object", "properties": {
-                "server": {"type": "string", "description": "server to start, e.g. rea"},
+                "server": {"type": "string", "description": "server to start, e.g. github"},
                 "tool": {"type": "string", "description": "with server: return this tool's full definition"}}},
         }),
         json!({

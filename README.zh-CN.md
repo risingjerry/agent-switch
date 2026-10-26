@@ -3,318 +3,163 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/agent-switch-icon.png" width="112" alt="Agent Switch 应用图标">
+  <img src="docs/assets/fusebox-icon.png" width="104" alt="Fusebox 图标">
 </p>
 
-<h1 align="center">Agent Switch</h1>
+<h1 align="center">Fusebox</h1>
 
 <p align="center">
-  <strong>每个 MCP 只定义一次，每个密钥只保存一次，再安全同步到所有支持的本地 AI Agent。</strong>
-</p>
-
-<p align="center">
-  <a href="https://github.com/JNHFlow21/agent-switch/actions/workflows/ci.yml"><img src="https://github.com/JNHFlow21/agent-switch/actions/workflows/ci.yml/badge.svg" alt="CI 状态"></a>
-  <a href="https://www.apple.com/macos/"><img src="https://img.shields.io/badge/macOS-14%2B-111111?logo=apple" alt="需要 macOS 14 或更高版本"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-111111.svg" alt="MIT 许可证"></a>
+  <strong>AI Agent 要用的 MCP 和 Skill，统一放在一处，用到才加载。</strong><br>
+  给 Claude Code、Codex、DeepSeek Harness、Claude Desktop、Hermes 用的统一目录、统一密钥库和按需启动的 MCP。
 </p>
 
 <p align="center">
-  <a href="https://github.com/JNHFlow21/agent-switch/stargazers"><img src="https://img.shields.io/github/stars/JNHFlow21/agent-switch?style=flat-square&label=stars" alt="GitHub stars"></a>
-  <a href="https://github.com/JNHFlow21/agent-switch/forks"><img src="https://img.shields.io/github/forks/JNHFlow21/agent-switch?style=flat-square&label=forks" alt="GitHub forks"></a>
-  <a href="https://github.com/JNHFlow21/agent-switch/commits/main"><img src="https://img.shields.io/github/commit-activity/t/JNHFlow21/agent-switch?style=flat-square&label=commits" alt="GitHub commit activity"></a>
-  <a href="https://github.com/JNHFlow21/agent-switch/releases"><img src="https://img.shields.io/github/downloads/JNHFlow21/agent-switch/total?style=flat-square&label=downloads" alt="Release downloads"></a>
-  <img src="https://visitor-badge.laobi.icu/badge?page_id=JNHFlow21.agent-switch&left_text=README%20visits" alt="README visit counter">
+  <a href="https://github.com/risingjerry/fusebox/actions/workflows/ci.yml"><img src="https://github.com/risingjerry/fusebox/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/risingjerry/fusebox/releases"><img src="https://img.shields.io/github/v/release/risingjerry/fusebox?color=111111" alt="Release"></a>
+  <img src="https://img.shields.io/badge/macOS%2014%2B%20%C2%B7%20Linux%20CLI-111111" alt="macOS 14+ 与 Linux 命令行">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-111111.svg" alt="MIT 许可"></a>
+  <a href="https://github.com/risingjerry/fusebox/stargazers"><img src="https://img.shields.io/github/stars/risingjerry/fusebox?style=flat&color=111111" alt="Stars"></a>
 </p>
 
 <p align="center">
-  <img src="docs/assets/agent-switch-dashboard-en.png" width="820" alt="Agent Switch 仪表板，展示健康状态、配置漂移、MCP 路由和密钥可用状态">
+  <img src="docs/demo.gif" width="760" alt="fusebox find 用中文或英文为任务挑出合适的 Skill 和 MCP">
 </p>
 
-<p align="center">
-  <sub>真实 macOS 仪表板使用隔离的示例配置，展示健康状态、配置漂移、路由和密钥是否就绪，但绝不显示密钥值。</sub>
-</p>
+装了上百个 Skill、十几个 MCP 之后，每个 Agent 会话都要为它们全部买单：说明文字占满上下文，MCP 进程一直开着，每个 Agent 还各存一份配置和 API Key。
 
-Codex、Claude Code、Claude Desktop 和 Hermes 都维护着各自的 MCP
-配置。把相同的服务器与密钥复制到每个客户端，不仅容易产生配置漂移，也会让密钥散落在多个文件中。
+Fusebox 让每个 MCP 和 Skill 只有两种状态：
 
-Agent Switch 用一个本地 MCP 注册表、一个私密凭据存储和可重复生成的 Agent
-配置替代这些副本。
+- **常驻**：每个会话都加载，因为你明确要求了。
+- **按需**：其余全部。Agent 能看到名字，任务需要时自己查到、加载；MCP 闲置后自动关掉。
 
-> [!IMPORTANT]
-> Agent Switch 目前仍是 **Alpha 软件**。公开 App 使用 ad-hoc 签名，尚未经过
-> Apple 公证，因此项目自己的 Homebrew Cask 会在安装完成后移除 Gatekeeper
-> quarantine。安装前请先检查[公开源码](https://github.com/JNHFlow21/agent-switch)
-> 和[发行校验和](https://github.com/JNHFlow21/agent-switch/releases/tag/v0.3.0)。
+它用一份登记表生成各个 Agent 的原生配置；密钥只存一个文件，只有声明了某个 Key 的 MCP 才能读到；还会从你自己的会话记录里统计到底用了什么。
 
-原生应用会跟随 macOS 的语言偏好，并完整提供**英文**与**简体中文**界面。
-
-## 快速开始
-
-### 前置条件
-
-- macOS 14 或更高版本
-- Homebrew 6.0 或更高版本
-
-### 安装
-
-复制执行下面这一条经过验证的命令：
+## 安装
 
 ```bash
-brew tap JNHFlow21/tap && brew trust --tap JNHFlow21/tap && brew install --cask JNHFlow21/tap/agent-switch
+# macOS：命令行 + App
+brew install risingjerry/tap/fusebox
+brew install --cask risingjerry/tap/fusebox
+
+# 任何装了 Rust 的系统（命令行；App 需要 macOS + Xcode）
+git clone https://github.com/risingjerry/fusebox && fusebox/scripts/install.sh
 ```
 
-Homebrew 会：
-
-1. 注册并显式信任项目自己的 Tap；
-2. 通过 `agent-switch-cli` 安装 `agent-switch` CLI；
-3. 把通用架构原生 App 安装到 `/Applications/Agent Switch.app`；
-4. 因为当前 Alpha 尚未公证，所以移除 Gatekeeper quarantine；
-5. 不会自动接管 MCP，也不会改写原生 Agent 配置。
-
-首次安装成功后应当看到：
-
-```text
-agent-switch --version  -> agent-switch 0.3.0
-原生应用                  -> /Applications/Agent Switch.app
-```
-
-从“应用程序”打开 Agent Switch，或者运行：
+然后：
 
 ```bash
-open -a "Agent Switch"
-agent-switch mcp import --dry-run --json
-agent-switch doctor
+fusebox doctor                     # 看它发现了什么、准备写什么（不会写入）
+fusebox skills add-source my-skills --path ~/.claude/skills-src   # 或 --git URL
+fusebox mcp add github --command npx --arg -y --arg @example/github-mcp@1.2.3 --secret GITHUB_TOKEN
+printf %s "$TOKEN" | fusebox secret set --stdin GITHUB_TOKEN   # 密钥不会出现在命令参数或日志里
+fusebox reconcile                  # 写入各 Agent 的配置（先备份）
 ```
 
-在执行 `agent-switch mcp import --adopt` 或 `agent-switch reconcile`
-之前，请先检查检测到的 MCP ID、目标应用和所需密钥的**名称**。
+新加的 MCP 和 Skill 默认**按需**。要常驻：`fusebox mcp direct ID` 或 `fusebox skills enable global NAME`。
 
-<details>
-<summary>为什么使用 Homebrew，而不是 npm 或 NPX？</summary>
+## 能做什么
 
-Agent Switch 是原生 macOS 应用加 Python CLI，Node.js 并不是它的运行时。
-npm/NPX 只会引入无关依赖，最终仍然需要构建或下载 macOS 应用。
+| | |
+|---|---|
+| **一个目录** | `fusebox find "合并两个 PDF"` 把 Skill 和 MCP 放在一起排序，中英文都行，并优先你在当前项目里常用的。 |
+| **按需启动的 MCP** | 每个 Agent 只挂一个 `agent-hub`。某个 MCP 第一次被调用才启动，只拿到它自己的密钥，闲置 5 分钟自动关闭。工具上百个的 MCP 只列名字，需要时再取详细定义。 |
+| **名单而不是长篇说明** | Claude Code 只看到按需 Skill 的名字（`name-only`），最常用的 30 个附一句说明；Codex 和 DeepSeek Harness 在说明文件里拿到同样的名单。 |
+| **一个密钥库** | `~/.config/fusebox/secrets.env`（权限 0600）。只能通过标准输入或文件描述符写入，不走命令参数；每个 MCP 的启动脚本只导出它声明的 Key。 |
+| **用量与建议** | `fusebox skills usage` 读取 Claude Code、Codex、DeepSeek Harness 的会话记录；`fusebox advise` 据此给出具体命令：哪些该常驻、哪些只在某个项目用、哪些 Agent 已经找不到了。 |
+| **可量化的检索效果** | `fusebox eval` 用你真实的"提问 → 选了哪个 Skill"记录来测 `find`，并保留历史，改坏了能马上看出来。 |
+| **macOS App** | 中英双语的仪表盘。人负责看，改动交给 Agent。 |
 
-当前 Alpha 的发行链路是：
+<p align="center">
+  <img src="docs/assets/fusebox-overview.png" width="760" alt="Fusebox App 概览页：MCP、Skill、密钥和 Agent 同步状态（演示数据）">
+</p>
 
-```text
-ad-hoc 签名的发行产物 -> GitHub Releases -> 项目自己的 Homebrew Cask
-```
+## 配合 Claude Code、Codex 等 Agent 使用
 
-Developer ID 签名和 Apple 公证仍然是稳定版目标。详情见[路线图](docs/roadmap.md)。
-
-</details>
-
-## 使用前后有什么变化
-
-| 使用 Agent Switch 之前 | 使用 Agent Switch 之后 |
-| --- | --- |
-| 同一个 MCP 要分别配置到每个 Agent | 注册一次，再选择需要同步到哪些 Agent |
-| API Key 被复制到多个原生客户端配置中 | 密钥值只保存在一个私密本地存储中 |
-| MCP 修改后，不同客户端会悄悄产生漂移 | `doctor` 发现漂移，`reconcile` 修复漂移 |
-| 每个 MCP 都可能继承完整的 Shell 环境 | 每个 Wrapper 只注入明确授权的密钥名称 |
-| 迁移现有配置像一次不可控的大改动 | 先预览，再明确确认接管，并自动备份 |
-
-新安装默认使用空注册表。Agent Switch 不会预装维护者喜欢的 MCP，也不会索取无关密钥。
-
-## 核心工作流
+装上自带的 Skill，任何 Agent 都知道怎么用 Fusebox：
 
 ```bash
-# 1. 只预览支持的用户级 stdio MCP，不修改文件
-agent-switch mcp import --dry-run --json
-
-# 2. 备份原生配置，并明确接管预览过的 MCP
-agent-switch mcp import --adopt
-
-# 3. 通过本地管道写入密钥，不把值放进参数或聊天记录
-secret-producing-command | agent-switch secret set --stdin SEARCH_API_KEY
-
-# 4. 先检查健康状态与漂移，再应用中央配置
-agent-switch doctor
-agent-switch reconcile
-
-# 5. 要求所有受管状态完全一致
-agent-switch doctor --strict
+npx skills add risingjerry/fusebox        # 或把 skills/fusebox 复制到 ~/.claude/skills/
 ```
 
-不要在被记录的命令中用真实密钥替换 `secret-producing-command`。
-macOS 应用是交互式录入密钥最简单的方式。
+然后直接说：
 
-## Agent Switch 管理什么
+- "找个能把这份大纲做成幻灯片的 Skill。"
+- "我的 Skill 和 MCP 里哪些值得常驻？先给我看，我同意的再改。"
+- "把 Brave Search MCP 按需加上，Key 我来粘贴。"
 
-| 领域 | 当前能力 |
-| --- | --- |
-| **MCP 服务** | 导入、新增、编辑、选择目标、启用、停用、删除并同步用户级 command/stdio MCP |
-| **凭据** | 每个值只保存一次，每个 MCP 只能获得明确声明的密钥名称 |
-| **Agent 策略** | 为 Codex、Claude Code 和 Hermes 同步有边界的指令块 |
-| **健康检查** | 检测无效配置、缺失密钥名称、未固定版本的 `npx` 包、受阻目标和配置漂移 |
-| **恢复** | 原子写入，并在迁移或替换原生文件前创建备份 |
-| **CLI 清单** | 显示本机 AI 工具、版本、包管理器和可执行文件路径 |
-| **Skills** | 读取可选的 Skill Hub 清单，但不会把“已下载”当成“已激活” |
-| **CC Switch** | 保留 Provider 切换，只镜像 Agent Switch 自己拥有的 MCP 行 |
+Agent 会调用 `fusebox find`、`fusebox advise --json` 以及 hub 的 `fusebox_servers` / `fusebox_call`。在本仓库里干活的 Agent 请读 [AGENTS.md](AGENTS.md)。
+
+## 命令
+
+| 命令 | 作用 |
+|---|---|
+| `fusebox status` / `doctor` | 配置偏差、缺失密钥、问题；不写入 |
+| `fusebox reconcile [--dry-run]` | 写入原生配置、启动脚本和说明（带备份） |
+| `fusebox find 关键词` | 为任务给 Skill 和 MCP 排序 |
+| `fusebox mcp list\|add\|set\|remove\|import` | 管理 MCP；`mcp hub ID` / `mcp direct ID` 切换按需 / 常驻 |
+| `fusebox secret set --stdin NAME` · `list` · `delete` | 密钥库（只输出名字） |
+| `fusebox skills add-source\|fetch\|enable\|disable\|move\|drop\|restore` | Skill 来源与状态 |
+| `fusebox skills usage` · `advise` · `eval` | 用了什么、该改什么、`find` 准不准 |
+
+所有读取类命令都支持 `--json`。完整帮助：`fusebox --help`。
 
 ## 工作原理
 
-```mermaid
-flowchart LR
-    UI["macOS 应用或 CLI"] --> C["中央配置"]
-    C --> D["Doctor"]
-    D --> R["Reconcile"]
-    S["私密密钥存储"] --> W["每个 MCP 独立 Wrapper"]
-    R --> X["不含密钥的 Agent 配置"]
-    W --> M["MCP 进程"]
-    X --> A["Codex"]
-    X --> B["Claude Code / Desktop"]
-    X --> H["Hermes"]
+```
+             fusebox reconcile
+config.json ───────────────────▶ ~/.claude.json、~/.claude/settings.json、~/.claude/skills
+secrets.env                      ~/.codex/config.toml + AGENTS.md
+Skill Hub                        ~/.dsh/cordis.patch.yml + AGENTS.md、Claude Desktop、Hermes
+
+Agent ──▶ agent-hub（一个 stdio MCP）──首次调用──▶ 启动脚本 ──▶ MCP（只拿自己的密钥）
+                                      ◀──闲置 5 分钟── 关闭
 ```
 
-| 本地事实来源 | 默认路径 |
-| --- | --- |
-| MCP 定义与授权 | `~/.config/agent-switch/config.json` |
-| 凭据值 | `~/.config/agent-switch/secrets.env` |
-| 生成的 MCP Wrapper | `~/.config/agent-switch/mcp/bin/` |
-| 原生配置备份 | `~/.config/agent-switch/backups/` |
+- Fusebox 只管理 `agent-*` 开头的 MCP 条目和它自己标记的说明段落，这些文件里的其他内容原样保留。
+- Skill 放在 Skill Hub 里（默认 `~/.config/fusebox/skill-hub`；可在 `config.json` 设 `skillHub` 或用环境变量 `SKILL_HUB_HOME` 换位置），git 来源锁定版本，可按项目分配。
 
-Agent Switch 只管理 `agent-*` MCP 条目和带标记的指令块。其他 Provider 与 MCP
-设置会被保留。
+## 按需加载会不会挑得更差？
 
-## 支持的集成
+我们测下来不会。用 112 条真实的"用户提问 → Agent 加载了哪个 Skill"记录测试：只给模型看名字时，正确答案出现在它前三个选择里的比例，和给它看全部完整说明时一样；名字加上最常用 30 个的一句话说明效果更好（53% 对 47–48%，各跑两轮），篇幅只有全部说明的三分之一。用 `fusebox eval` 可以在你自己的会话记录上测 `find`。
 
-| 集成 | MCP 同步 | 共享策略 | 状态清单 |
-| --- | :---: | :---: | :---: |
-| Codex | ✓ | ✓ | ✓ |
-| Claude Code | ✓ | ✓ | ✓ |
-| Claude Desktop | ✓ | — | — |
-| Hermes | ✓ | ✓ | ✓ |
-| CC Switch | 仅镜像自己拥有的行 | 保留 Provider 设置 | Schema 检查 |
-| Skill Hub | Skill 清单/更新 | 显式项目或全局 Profile | ✓ |
+## 常见问题
 
-新增 Agent 必须先实现并测试专用适配器。Agent Switch 不会猜测未知配置格式。
+**怎么不让 MCP 占满 Claude Code 的上下文？**
+把它们放到 `agent-hub` 后面（`fusebox mcp hub ID`，新加的默认就是）。Claude Code 只看到工具名，用到才加载定义。
 
-## 凭据与隐私边界
+**怎么让 Claude Code 和 Codex 共用一套 MCP？**
+用 `fusebox mcp add` 每个只加一次，`fusebox reconcile` 会同时写入两边配置；两边都通过 hub 访问所有按需 MCP。
 
-Agent Switch 是本地优先工具，但它**不是密码保险库**。
+**API Key 存在哪？Agent 能读到吗？**
+存在 `~/.config/fusebox/secrets.env`（权限 0600）。原生配置里只引用启动脚本，脚本只导出该 MCP 声明的 Key。Agent 只能看到 Key 的名字，看不到值。
 
-- 凭据值保存在本地 mode-`0600` 文件中，不进入 Git、应用偏好、生成的
-  Agent 配置或 Wrapper 源码。
-- 写入密钥使用 stdin 或继承的文件描述符，不使用位置参数。
-- 读取密钥时拒绝 stdout、stderr、终端和别名描述符。
-- Wrapper 把密钥文件当数据解析，移除继承的敏感变量，只注入当前 MCP
-  获得授权的名称。
-- 诊断、导入预览和审计只报告密钥**名称**，不报告值。
-- 缺少必需密钥名称时，Wrapper 会关闭失败。
-- 产品没有上传服务或云账户；但 Agent 调用某个 MCP 时，该 MCP 仍可能访问自己的服务商。
+**怎么知道哪些 Skill 从来没用过？**
+`fusebox skills usage --days 60` 和 `fusebox advise`。
 
-使用敏感凭据前，请阅读[密钥与 Wrapper](docs/secrets-and-wrappers.md)和
-[安全策略](SECURITY.md)。安全问题应按照 `SECURITY.md` 的私密渠道报告，不要创建公开 Issue。
+**支持 Linux 和 Windows 吗？**
+命令行在 Linux 上能编译并通过 CI；App 只支持 macOS。Windows 未测试。
 
-## 当前 Alpha 范围
+**App 有签名吗？**
+是临时签名，没有经过苹果公证（还没有 Apple Developer ID）。Homebrew 安装时会去掉隔离标记，并会提示这一点。介意的话可以从源码编译。
 
-0.2 版本管理 macOS 上用户级 command/stdio MCP 定义和静态凭据值。
-
-目前尚未提供：
-
-- 原生 HTTP/SSE Transport 或 OAuth Session 迁移；
-- 项目级 MCP 发现；
-- 对未知 Agent 的自动支持；
-- 经过 Developer ID 签名并公证的可下载应用；
-- 已发布的 PyPI 包；
-- 密码管理器或硬件保护的凭据保险库。
-
-这些是明确限制，不是隐藏功能。计划中的工作记录在[路线图](docs/roadmap.md)中。
-
-## 常用命令
+## 卸载
 
 ```bash
-agent-switch agents               # 检测到的 Agent 与策略接入状态
-agent-switch clis                 # 已安装的 AI CLI 清单
-agent-switch mcp list             # 中央 MCP 注册表
-agent-switch secret list          # 只显示凭据名称
-agent-switch skills               # 可选的 Skill Hub 清单
-agent-switch doctor --json        # 机器可读的健康报告
-agent-switch reconcile --dry-run  # 计划执行的受管变更
+brew uninstall --cask fusebox; brew uninstall fusebox   # 或删除 ~/.local/bin/fusebox
 ```
 
-新增一个中央管理的 MCP：
+在你删掉 `agent-*` 条目之前，各 Agent 的配置照常可用；Fusebox 改过的每个文件都备份在 `~/.config/fusebox/backups`。
 
-```bash
-agent-switch mcp add filesystem \
-  --command npx \
-  --arg=-y \
-  --arg=@modelcontextprotocol/server-filesystem@1.0.0 \
-  --app codex \
-  --app claude
+## 限制
 
-agent-switch reconcile
-```
+- 远程（HTTP/SSE）MCP 暂不管理，Fusebox 不会改动它们。
+- Codex 没有"只显示名字"的 Skill 模式，所以 Fusebox 把按需名单写进它的说明文件。
+- hub 不转发服务器发给客户端的请求（sampling、elicitation）。
 
-完整生命周期命令和安全导入行为见[统一 MCP 注册表](docs/mcp-registry.md)。
+---
 
-## 更新
+如果 Fusebox 帮你省下了上下文，点个 ⭐ 能让更多人找到它。
 
-通过 Homebrew 安装的版本：
+[![Star History Chart](https://api.star-history.com/svg?repos=risingjerry/fusebox&type=Date)](https://star-history.com/#risingjerry/fusebox&Date)
 
-```bash
-brew update
-brew upgrade --cask JNHFlow21/tap/agent-switch
-```
-
-Agent Switch 不会静默更新自己、第三方 CLI 或 Skill 源。
-
-## 文档
-
-- [统一 MCP 注册表](docs/mcp-registry.md)
-- [密钥与 Wrapper](docs/secrets-and-wrappers.md)
-- [CC Switch 兼容性](docs/ccswitch-compat.md)
-- [恢复与回滚](docs/recovery.md)
-- [路线图](docs/roadmap.md)
-- [参与贡献](CONTRIBUTING.md)
-- [安全策略](SECURITY.md)
-
-## 开发
-
-需要 Python 3.11+、`pipx` 和完整 Xcode 的贡献者仍然可以使用源码安装器：
-
-```bash
-git clone https://github.com/JNHFlow21/agent-switch.git && cd agent-switch && ./scripts/install.sh
-```
-
-创建可编辑的 CLI 开发环境：
-
-```bash
-git clone https://github.com/JNHFlow21/agent-switch.git
-cd agent-switch
-python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install -e .
-python -m unittest discover -s tests
-python -m unittest discover -s tests/integration
-```
-
-原生应用位于 [`macos-app/AgentSwitch`](macos-app/AgentSwitch)，最低支持
-macOS 14。完整测试和隐私门禁见 [CONTRIBUTING.md](CONTRIBUTING.md)。
-
-## 项目数据
-
-| 公开指标 | 实时数据或最近一次维护者可见数据 |
-| --- | ---: |
-| Star / Fork / Commit / 发行下载量 | 见上方实时徽章 |
-| README 访问量 | 见上方公开计数器；可能包含机器人和重复访问 |
-| 仓库独立访客 | GitHub Traffic 最近 14 天滚动窗口内为 **0** |
-| 独立克隆者 | 最近 14 天滚动窗口内为 **11**（共 **12** 次克隆） |
-
-<sub>数据快照日期：2026-08-10。GitHub 只向仓库维护者提供克隆与独立访客数据，因此这里采用注明日期的透明快照，而不是需要私密 Token 的公开徽章。</sub>
-
-### 克隆趋势
-
-<p align="center">
-  <a href="https://github.com/JNHFlow21/agent-switch">
-    <img width="800" src="https://raw.githubusercontent.com/JNHFlow21/agent-switch/metrics/repository-metrics.svg" alt="Agent Switch 最近 14 天克隆趋势与仓库指标">
-  </a>
-</p>
-
-<sub>曲线展示 GitHub Traffic 最近 14 天滚动窗口内的累计克隆次数。Traffic 序列采用注明日期的仓库所有者聚合快照；侧边的 Star、Fork 与 Commit 会在每次获得新 Star 后及每周自动刷新。README 中不嵌入任何长期 Token。</sub>
-
-## 许可证
-
-[MIT](LICENSE) © 2026 JNHFlow21
+MIT © risingjerry · 曾用名 Agent Switch。

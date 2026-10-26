@@ -84,6 +84,16 @@ const SYNONYMS: &[(&str, &str)] = &[
     ("支付宝", "alipay"),
     ("转写", "transcribe transcript"),
     ("录音", "audio recording"),
+    ("合并", "merge"),
+    ("拆分", "split"),
+    ("发票", "invoice receipt"),
+    ("报告", "report"),
+    ("周报", "weekly report"),
+    ("幻灯片", "slide deck"),
+    ("数据库", "database"),
+    ("迁移", "migration migrate"),
+    ("网页", "web page browser"),
+    ("浏览器", "browser"),
 ];
 
 fn widen_query(query: &str) -> String {

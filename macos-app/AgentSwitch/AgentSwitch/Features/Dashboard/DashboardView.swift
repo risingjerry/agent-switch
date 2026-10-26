@@ -80,8 +80,6 @@ struct DashboardView: View {
     private var tiles: some View {
         let enabled = state.mcps.filter(\.enabled)
         let hub = enabled.filter { $0.mode == "hub" }.count
-        let usage = state.usage
-        let unusedSkills = usage?.enabled.filter { $0.total == 0 }.count
         let missing = state.missingSecrets.count
         return LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), spacing: DS.pad)], spacing: DS.pad) {
             tile(.mcp) {
@@ -90,11 +88,11 @@ struct DashboardView: View {
                                         "个常驻 · \(hub + state.mcps.count - enabled.count) 个按需"))
             }
             tile(.skills) {
-                StatTile(symbol: Page.skills.symbol, title: L10n.skills, value: "\(usage?.enabled.count ?? 0)",
-                         detail: unusedSkills.map {
-                             L10n.t("\($0) unused in \(state.usageDays) days", "\($0) 个 \(state.usageDays) 天没用过")
-                         } ?? L10n.checking,
-                         tint: (unusedSkills ?? 0) > 0 ? DS.warn : .accentColor)
+                let all = state.skills?.skills.filter { $0.status != "missing" } ?? []
+                let resident = all.filter { $0.status == "global" || $0.status == "project" }.count
+                StatTile(symbol: Page.skills.symbol, title: L10n.skills, value: "\(resident)",
+                         detail: L10n.t("resident · \(all.count - resident) on demand",
+                                        "个常驻 · \(all.count - resident) 个按需"))
             }
             tile(.secrets) {
                 StatTile(symbol: Page.secrets.symbol, title: L10n.secrets, value: "\(state.secretNames.count)",
@@ -143,7 +141,7 @@ struct DashboardView: View {
                         Text(c.detail).font(.callout)
                         Spacer()
                         if let path = c.path {
-                            Text((path as NSString).abbreviatingWithTildeInPath)
+                            Text(DS.tilde(path))
                                 .font(.caption).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.middle)
                         }
                     }

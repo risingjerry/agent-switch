@@ -1,17 +1,17 @@
 # Unified MCP Registry
 
-Agent Switch treats `~/.config/agent-switch/config.json` as the source of truth
-for MCP definitions and `~/.config/agent-switch/secrets.env` as the source of
+Fusebox treats `~/.config/fusebox/config.json` as the source of truth
+for MCP definitions and `~/.config/fusebox/secrets.env` as the source of
 truth for credential values.
 
 ## Neutral first run
 
-A new registry is empty. Agent Switch does not preinstall search, social, or
+A new registry is empty. Fusebox does not preinstall search, social, or
 provider-specific MCPs and does not request unrelated credentials.
 
 ```bash
-agent-switch write-default-config
-agent-switch mcp list
+fusebox write-default-config
+fusebox mcp list
 ```
 
 ## Import and adoption
@@ -19,13 +19,13 @@ agent-switch mcp list
 Preview MCPs found in Claude Code, Claude Desktop, Codex, and Hermes:
 
 ```bash
-agent-switch mcp import --dry-run --json
+fusebox mcp import --dry-run --json
 ```
 
 Adoption is explicit:
 
 ```bash
-agent-switch mcp import --adopt
+fusebox mcp import --adopt
 ```
 
 The adopt flow validates every source first, classifies credential-shaped
@@ -44,12 +44,12 @@ authentication semantics; see the roadmap. Discovery reports those entries as
 ## Registry lifecycle
 
 ```bash
-agent-switch mcp add NAME --command COMMAND [--arg ARG] [--secret NAME] [--app APP]
-agent-switch mcp set NAME --command COMMAND [options]
-agent-switch mcp enable NAME
-agent-switch mcp disable NAME
-agent-switch mcp remove NAME
-agent-switch mcp list --json
+fusebox mcp add NAME --command COMMAND [--arg ARG] [--secret NAME] [--app APP]
+fusebox mcp set NAME --command COMMAND [options]
+fusebox mcp enable NAME
+fusebox mcp disable NAME
+fusebox mcp remove NAME
+fusebox mcp list --json
 ```
 
 Supported app IDs are `claude`, `claude_desktop`, `codex`, and `hermes`.
@@ -59,10 +59,10 @@ reconcile without deleting stored credential values.
 `--env NAME=VALUE` is only for non-secret settings. Names that look like keys,
 tokens, passwords, credentials, or authentication values are rejected and must
 be declared with `--secret NAME`; their values are written separately through
-the Secret UI or `agent-switch secret set --stdin NAME`.
+the Secret UI or `fusebox secret set --stdin NAME`.
 
 ## Ownership
 
-Agent Switch owns only `agent-*` entries and its marked instruction blocks.
+Fusebox owns only `agent-*` entries and its marked instruction blocks.
 Unrelated native configuration is preserved. Existing files are written
 atomically and backups are kept in the private mode-`0700` backup directory.

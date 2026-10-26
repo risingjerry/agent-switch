@@ -2,9 +2,9 @@
 name = "fusebox"
 version = "0.4.0"
 edition = "2024"
-description = "One lightweight control plane for agent secrets, MCP servers, CLIs and Skills."
+description = "On-demand MCP servers and Skills for Claude Code, Codex and other AI agents, with one secret store and one catalog."
 license = "MIT"
-repository = "https://github.com/risingjerry/agent-switch"
+repository = "https://github.com/risingjerry/fusebox"
 rust-version = "1.89"
 
 [[bin]]

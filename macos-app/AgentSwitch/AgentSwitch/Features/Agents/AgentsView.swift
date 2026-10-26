@@ -19,7 +19,7 @@ struct AgentsStrip: View {
                             Text(agent.name).font(.body.weight(.medium))
                         }
                         Text(state(agent)).font(.callout).foregroundStyle(.secondary)
-                        Text((agent.instructionPath as NSString).abbreviatingWithTildeInPath)
+                        Text(DS.tilde(agent.instructionPath))
                             .font(.caption)
                             .foregroundStyle(.tertiary)
                             .lineLimit(1)
