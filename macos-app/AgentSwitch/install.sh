@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="${0:A:h}"
 DERIVED_DATA="${TMPDIR:-/tmp}/FuseboxInstallDerivedData"
 PRODUCT="$DERIVED_DATA/Build/Products/Release/Fusebox.app"
-INSTALL_DIR="$HOME/Applications"
+INSTALL_DIR="${FUSEBOX_APP_DIR:-$HOME/Applications}"
 DESTINATION="$INSTALL_DIR/Fusebox.app"
 trap 'rm -rf "$DERIVED_DATA"' EXIT
 

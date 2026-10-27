@@ -581,6 +581,32 @@ pub fn add_source(hub: &Hub, id: &str, spec: Value) -> Result<()> {
     write_json(&path, &Value::Object(registry))
 }
 
+/// Undo `add_source` (an install that found no Skills): drops the registry
+/// and lock entries. Files are left to the caller.
+pub fn remove_source(hub: &Hub, id: &str) -> Result<()> {
+    let path = hub.root.join("config").join("registry.json");
+    let mut registry = read_json_object(&path)?;
+    if let Some(sources) = registry.get_mut("sources").and_then(Value::as_object_mut) {
+        sources.remove(id);
+    }
+    write_json(&path, &Value::Object(registry))?;
+    let lock_path = hub.lock_path();
+    if lock_path.exists() {
+        let mut lock = read_json_object(&lock_path)?;
+        if let Some(sources) = lock.get_mut("sources").and_then(Value::as_object_mut) {
+            sources.remove(id);
+        }
+        write_json(&lock_path, &Value::Object(lock))?;
+    }
+    Ok(())
+}
+
+/// Default branch of a remote repository, from `git ls-remote --symref`.
+pub fn remote_head(hub: &Hub, url: &str) -> Option<String> {
+    let out = git(&["ls-remote", "--symref", url, "HEAD"], &hub.root).ok()?;
+    out.lines().find_map(|l| l.strip_prefix("ref: refs/heads/")?.split_whitespace().next().map(String::from))
+}
+
 /// Take Skills out of a source's catalog (`excluded = true`) or put them
 /// back. Files stay on disk. Returns the names that changed.
 pub fn set_excluded(hub: &Hub, source: &str, names: &[String], excluded: bool) -> Result<Vec<String>> {

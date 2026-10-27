@@ -52,6 +52,9 @@ const VALUE_OPTS: &[&str] = &[
     "git",
     "ref",
     "skill-path",
+    "url",
+    "id",
+    "resident-in",
 ];
 
 #[derive(Default)]
@@ -110,7 +113,7 @@ impl Args {
         self.pos.get(i).map(String::as_str).ok_or_else(|| format!("missing {what}"))
     }
     fn check(&self, allowed: &[&str]) -> Result<()> {
-        const GLOBAL: [&str; 3] = ["home", "user-home", "config"];
+        const GLOBAL: [&str; 4] = ["home", "user-home", "config", "no-sync"];
         match self.opts.keys().find(|k| !allowed.contains(&k.as_str()) && !GLOBAL.contains(&k.as_str())) {
             Some(k) => Err(format!("unrecognized option --{k}")),
             None => Ok(()),
@@ -159,6 +162,9 @@ Usage: fusebox [--home DIR] [--user-home DIR] [--config FILE] <command>
 
   status | doctor [--json] [--strict]   show drift, missing secrets, findings
   reconcile [--json] [--dry-run]        write native configs, wrappers, instructions
+  install skill SOURCE [--id ID] [--ref R] [--skill-path P] [--resident-in PROFILE]
+                                        GitHub URL, owner/repo or local folder → on-demand Skills
+  install mcp ID (--command C [--arg A]... | --url URL) [--secret NAME]... [--resident]
   agents | clis [--json]                detected agents / installed CLIs
   mcp list|add|set|remove|enable|disable|import
   mcp hub ID | mcp direct ID            serve an MCP lazily through the hub, or natively
@@ -175,6 +181,10 @@ Usage: fusebox [--home DIR] [--user-home DIR] [--config FILE] <command>
   run ID [ARGS...]                      start an MCP with only its secrets (used by wrappers)
   hub APP                               lazy MCP proxy (used by the agent-hub entry)
   write-default-config
+
+Commands that change the setup (install, mcp add/set/remove/enable/disable/hub/direct,
+skills add-source/fetch/update/enable/disable/drop/restore/move) sync every agent
+afterwards; pass --no-sync to skip.
 ";
 
 fn main() {
@@ -210,9 +220,46 @@ fn dispatch(argv: &[String]) -> Result<i32> {
     }
     let ctx = Ctx::new(&args);
     let rest = Args { pos: args.pos[1..].to_vec(), opts: args.opts.clone() };
+    let code = run_command(&ctx, &args, &rest)?;
+    if code == 0 && changes_setup(&args.pos) && !args.flag("no-sync") {
+        return autosync(&ctx, args.flag("json"));
+    }
+    Ok(code)
+}
+
+/// Writes that change what agents should see; each is followed by a sync so
+/// no change is left for someone to remember `fusebox reconcile`.
+fn changes_setup(pos: &[String]) -> bool {
+    let sub = pos.get(1).map(String::as_str).unwrap_or("");
+    match pos[0].as_str() {
+        "install" => true,
+        "mcp" => matches!(sub, "add" | "set" | "remove" | "enable" | "disable" | "hub" | "direct"),
+        "skills" => {
+            matches!(sub, "add-source" | "fetch" | "update" | "enable" | "disable" | "drop" | "restore" | "move")
+        }
+        _ => false,
+    }
+}
+
+/// `reconcile` after a write. Quiet in --json mode (stdout already holds the
+/// command's payload); a blocked sync is reported on stderr with exit 1.
+fn autosync(ctx: &Ctx, json: bool) -> Result<i32> {
+    let (summary, post) = doctor::apply(&ctx.config()?, &ctx.paths)?;
+    if post.blocked() {
+        eprintln!("fusebox: saved, but syncing agents is blocked; run `fusebox doctor`");
+        return Ok(1);
+    }
+    if !json && summary.changed > 0 {
+        print(&format!("synced agents ({} file(s) updated)\n", summary.changed));
+    }
+    Ok(0)
+}
+
+fn run_command(ctx: &Ctx, args: &Args, rest: &Args) -> Result<i32> {
     match args.pos[0].as_str() {
-        "doctor" | "status" => cmd_doctor(&ctx, &rest),
-        "reconcile" => cmd_reconcile(&ctx, &rest),
+        "install" => cmd_install(ctx, rest),
+        "doctor" | "status" => cmd_doctor(ctx, rest),
+        "reconcile" => cmd_reconcile(ctx, rest),
         "agents" => {
             rest.check(&["json"])?;
             let agents = inventory::agents(&ctx.config()?, &ctx.paths)?;
@@ -244,12 +291,12 @@ fn dispatch(argv: &[String]) -> Result<i32> {
             }
             Ok(0)
         }
-        "mcp" => cmd_mcp(&ctx, &rest),
-        "advise" => cmd_advise(&ctx, &rest),
-        "find" => cmd_find(&ctx, &rest),
-        "eval" => cmd_eval(&ctx, &rest),
-        "secret" => cmd_secret(&ctx, &rest),
-        "skills" => cmd_skills(&ctx, &rest),
+        "mcp" => cmd_mcp(ctx, rest),
+        "advise" => cmd_advise(ctx, rest),
+        "find" => cmd_find(ctx, rest),
+        "eval" => cmd_eval(ctx, rest),
+        "secret" => cmd_secret(ctx, rest),
+        "skills" => cmd_skills(ctx, rest),
         "hub" => {
             let app = rest.pos.first().cloned().unwrap_or_else(|| "claude".into());
             hub::serve(ctx.paths.clone(), ctx.config_path.clone(), app)?;
@@ -432,7 +479,7 @@ fn cmd_mcp(ctx: &Ctx, a: &Args) -> Result<i32> {
             let mut line = format!("{verb} {id}");
             if sub == "hub" && tool.enabled && !a.flag("no-warm") {
                 match hub::warm(&ctx.paths, &updated, tool) {
-                    Ok(n) => line.push_str(&format!("; cached {n} tool(s); run `fusebox reconcile`")),
+                    Ok(n) => line.push_str(&format!("; cached {n} tool(s)")),
                     Err(e) => {
                         line.push_str(&format!("; tool list not cached yet ({e}); the hub retries on first start"))
                     }
@@ -530,6 +577,197 @@ fn cmd_mcp_import(ctx: &Ctx, a: &Args) -> Result<i32> {
             plan.secrets.len(),
             discovery.skipped.len()
         ),
+    );
+    Ok(0)
+}
+
+// ---- install ----
+
+fn cmd_install(ctx: &Ctx, a: &Args) -> Result<i32> {
+    match a.pos(0, "what to install (skill|mcp)")? {
+        "skill" => install_skill(ctx, a),
+        "mcp" => install_mcp(ctx, a),
+        "cli" => Err("CLIs install with their own package manager (brew, npm, uv, pipx); store their keys with \
+                      `fusebox secret set --stdin NAME` and install any Skill or MCP they ship with \
+                      `fusebox install skill|mcp`"
+            .into()),
+        other => Err(format!("unknown install kind: {other} (skill|mcp)")),
+    }
+}
+
+fn slug(name: &str) -> String {
+    let s: String = name
+        .trim_end_matches(".git")
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    s.trim_matches('-').to_string()
+}
+
+/// Registry spec for a local folder, `owner/repo`, a GitHub URL (including
+/// `/tree/REF/PATH` and `/blob/REF/PATH/SKILL.md`) or any other git URL.
+fn skill_source(hub: &skills::Hub, a: &Args, source: &str) -> Result<(String, Value)> {
+    let local = util::expand_user(source);
+    if local.is_dir() {
+        let dir = std::fs::canonicalize(&local).map_err(|e| e.to_string())?;
+        let name = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let id = a.one("id").map_or_else(|| slug(&name), String::from);
+        let spec =
+            json!({"type": "local", "path": dir.to_string_lossy(), "skillPath": a.one("skill-path").unwrap_or(".")});
+        return Ok((id, spec));
+    }
+    let trimmed = source.trim_end_matches('/');
+    let (mut url, mut reference, mut skill_path) = (trimmed.to_string(), None, None);
+    let shorthand = trimmed.split('/').collect::<Vec<_>>();
+    if !trimmed.contains(':')
+        && shorthand.len() == 2
+        && shorthand.iter().all(|p| !p.is_empty() && !p.starts_with(['.', '~']))
+    {
+        url = format!("https://github.com/{trimmed}.git");
+    } else if let Some(rest) = trimmed.strip_prefix("https://github.com/") {
+        let parts: Vec<&str> = rest.split('/').collect();
+        if parts.len() < 2 {
+            return Err(format!("not a repository URL: {source}"));
+        }
+        url = format!("https://github.com/{}/{}.git", parts[0], parts[1].trim_end_matches(".git"));
+        if parts.len() >= 4 && (parts[2] == "tree" || parts[2] == "blob") {
+            reference = Some(parts[3].to_string());
+            let path: Vec<&str> = parts[4..].iter().copied().filter(|p| *p != "SKILL.md").collect();
+            if !path.is_empty() {
+                skill_path = Some(path.join("/"));
+            }
+        }
+    } else if !trimmed.contains("://") && !trimmed.starts_with("git@") {
+        return Err(format!("not a folder, owner/repo or git URL: {source}"));
+    }
+    let name = url.trim_end_matches(".git").rsplit(['/', ':']).next().unwrap_or("").to_string();
+    let id = a.one("id").map_or_else(|| slug(&name), String::from);
+    let reference = a
+        .one("ref")
+        .map(String::from)
+        .or(reference)
+        .or_else(|| skills::remote_head(hub, &url))
+        .unwrap_or_else(|| "main".into());
+    let skill_path = a.one("skill-path").map(String::from).or(skill_path).unwrap_or_else(|| ".".into());
+    let spec = json!({"type": "git", "url": url, "ref": reference, "checkout": format!("vendor/{id}"), "skillPath": skill_path});
+    Ok((id, spec))
+}
+
+/// Register a Skill source, clone it (git) and report the Skills it holds.
+/// They are on demand unless --resident-in names a profile.
+fn install_skill(ctx: &Ctx, a: &Args) -> Result<i32> {
+    a.check(&["id", "ref", "skill-path", "resident-in", "json"])?;
+    let source = a.pos(1, "SOURCE (GitHub URL, owner/repo or folder)")?;
+    let hub = ctx.hub()?;
+    let (id, spec) = skill_source(&hub, a, source)?;
+    if id.is_empty() {
+        return Err(format!("cannot derive a source id from {source}; pass --id"));
+    }
+    let before: BTreeSet<String> = skills::catalog(&ctx.hub_root())?.into_iter().map(|e| e.name).collect();
+    skills::add_source(&hub, &id, spec.clone())?;
+    let hub = ctx.hub()?; // reload: the registry now has the source
+    let found = (|| {
+        if spec["type"] == "git" {
+            skills::fetch(&hub, std::slice::from_ref(&id))?;
+        }
+        let prefix = format!("{id}:");
+        let found: Vec<skills::CatalogEntry> =
+            skills::catalog(&ctx.hub_root())?.into_iter().filter(|e| e.id.starts_with(&prefix)).collect();
+        if found.is_empty() {
+            return Err(format!(
+                "no SKILL.md under {source}; for an MCP server use `fusebox install mcp`, for a CLI its package manager"
+            ));
+        }
+        Ok(found)
+    })();
+    let found = match found {
+        Ok(found) => found,
+        Err(e) => {
+            skills::remove_source(&hub, &id)?;
+            if spec["type"] == "git" {
+                let _ = std::fs::remove_dir_all(hub.root.join(format!("vendor/{id}")));
+            }
+            return Err(e);
+        }
+    };
+    let profile = a.one("resident-in");
+    if let Some(profile) = profile {
+        for e in &found {
+            let (src, path) = e.id.split_once(':').unwrap_or((&id, "."));
+            skills::enable(&hub, profile, &e.name, src, Some(path))?;
+        }
+        skills::sync_any(&hub, profile)?;
+    }
+    let shadowed: Vec<&str> = found.iter().filter(|e| before.contains(&e.name)).map(|e| e.name.as_str()).collect();
+    if a.flag("json") {
+        let list: Vec<Value> = found
+            .iter()
+            .map(|e| json!({"name": e.name, "description": e.description, "path": e.skill_md.parent().map(|p| p.to_string_lossy().into_owned())}))
+            .collect();
+        print(
+            &(json_pretty(
+                &json!({"installed": id, "source": spec, "skills": list, "residentIn": profile, "nameClashes": shadowed}),
+            ) + "\n"),
+        );
+    } else {
+        let state = profile.map_or("on demand".to_string(), |p| format!("resident in {p}"));
+        print(&format!("installed {id}: {} Skill(s), {state}\n", found.len()));
+        for e in &found {
+            let short: String = e.description.chars().take(100).collect();
+            print(&format!("  {} — {short}\n", e.name));
+        }
+        if !shadowed.is_empty() {
+            print(&format!("note: another source already has {}\n", shadowed.join(", ")));
+        }
+    }
+    Ok(0)
+}
+
+/// Add an MCP server (on demand unless --resident). `--url` wraps a remote
+/// server with mcp-remote.
+fn install_mcp(ctx: &Ctx, a: &Args) -> Result<i32> {
+    a.check(&["command", "arg", "url", "secret", "env", "app", "description", "name", "resident", "no-warm", "json"])?;
+    let mut spec = Args { pos: a.pos.clone(), opts: a.opts.clone() };
+    if let Some(url) = a.one("url") {
+        if a.flag("command") || a.flag("arg") {
+            return Err("pass --url or --command/--arg, not both".into());
+        }
+        if !url.starts_with("https://") && !url.starts_with("http://") || url.contains('\'') {
+            return Err(format!("not an http(s) URL: {url}"));
+        }
+        // A login shell gives npx the user's PATH even under GUI agents.
+        spec.opts.insert("command".into(), vec!["bash".into()]);
+        spec.opts.insert("arg".into(), vec!["-lc".into(), format!("exec npx -y mcp-remote '{url}'")]);
+    }
+    let tool = tool_from_args(&spec, None)?;
+    let id = tool.id.clone();
+    let (updated, _) = ctx.update(|c| config::put_tool(c, tool, true))?;
+    let tool = updated.find(&id).unwrap();
+    let mut line = format!("installed {id}: {}", if tool.mode == Mode::Hub { "on demand" } else { "resident" });
+    let stored = secrets::list_names(&ctx.paths.secrets_file).unwrap_or_default();
+    let missing: Vec<&String> = tool.required_secrets.iter().filter(|n| !stored.contains(n)).collect();
+    let mut cached = Value::Null;
+    // Warming starts the server, which needs its secrets.
+    if tool.mode == Mode::Hub && tool.enabled && missing.is_empty() && !a.flag("no-warm") {
+        match hub::warm(&ctx.paths, &updated, tool) {
+            Ok(n) => {
+                cached = json!(n);
+                line.push_str(&format!(", {n} tool(s)"));
+            }
+            Err(e) => line.push_str(&format!("; tool list not cached yet ({e}); the hub retries on first start")),
+        }
+    }
+    if !missing.is_empty() {
+        line.push_str(&format!(
+            "\nmissing secret(s): {} — store with `fusebox secret set --stdin NAME`",
+            missing.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
+        ));
+    }
+    json_or_line(
+        a.flag("json"),
+        json!({"installed": id, "mcp": tool.to_public(), "toolCount": cached, "missingSecrets": missing}),
+        &line,
     );
     Ok(0)
 }
@@ -709,7 +947,9 @@ fn cmd_skills(ctx: &Ctx, a: &Args) -> Result<i32> {
             };
             skills::add_source(&ctx.hub()?, id, spec.clone())?;
             if spec["type"] == "git" {
-                print(&format!("added {id}; run `fusebox skills fetch {id}` to clone it\n"));
+                print(&format!(
+                    "added {id}; run `fusebox skills fetch {id}` to clone it (or use `fusebox install skill`)\n"
+                ));
             } else {
                 print(&format!("added {id}; its Skills are on demand now (`fusebox skills`)\n"));
             }
@@ -746,7 +986,6 @@ fn cmd_skills(ctx: &Ctx, a: &Args) -> Result<i32> {
                     print(&format!("{}: {name} ({source})\n", if sub == "drop" { "dropped" } else { "restored" }));
                 }
             }
-            print("run `fusebox reconcile` to update agents\n");
         }
         "move" => {
             a.check(&["to", "from"])?;
@@ -1586,6 +1825,36 @@ fn cmd_find(ctx: &Ctx, a: &Args) -> Result<i32> {
 
 #[cfg(test)]
 mod tests {
+    fn args(v: &[&str]) -> Args {
+        Args::parse(&v.iter().map(|s| s.to_string()).collect::<Vec<_>>()).unwrap()
+    }
+
+    #[test]
+    fn skill_sources_from_github_forms() {
+        let hub = skills::Hub { root: std::env::temp_dir(), registry: Default::default() };
+        let a = args(&["--ref", "v1"]);
+        let (id, spec) = skill_source(&hub, &a, "acme/Cool_Skills").unwrap();
+        assert_eq!(id, "cool-skills");
+        assert_eq!(spec["url"], "https://github.com/acme/Cool_Skills.git");
+        assert_eq!(spec["checkout"], "vendor/cool-skills");
+        let (_, spec) =
+            skill_source(&hub, &args(&[]), "https://github.com/acme/kit/blob/dev/skills/pdf/SKILL.md").unwrap();
+        assert_eq!((spec["ref"].as_str(), spec["skillPath"].as_str()), (Some("dev"), Some("skills/pdf")));
+        assert!(skill_source(&hub, &a, "not a source").is_err());
+        assert!(skill_source(&hub, &a, "/missing-dir").is_err());
+    }
+
+    #[test]
+    fn only_writes_trigger_a_sync() {
+        let pos = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(changes_setup(&pos(&["install", "skill", "x"])));
+        assert!(changes_setup(&pos(&["mcp", "hub", "x"])));
+        assert!(changes_setup(&pos(&["skills", "add-source", "x"])));
+        assert!(!changes_setup(&pos(&["mcp", "list"])));
+        assert!(!changes_setup(&pos(&["skills", "search", "x"])));
+        assert!(!changes_setup(&pos(&["doctor"])));
+    }
+
     use super::*;
 
     #[test]
