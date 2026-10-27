@@ -44,6 +44,12 @@ final class AppState {
         async let skills = attempt { try await self.service.skills() }
         async let secrets = attempt { try await self.service.secretNames() }
         self.doctor = await doctor ?? self.doctor
+        // Drift from outside Fusebox (a Skill repo pulled, files edited by
+        // hand) is just a stale projection: sync it instead of asking.
+        if let d = self.doctor, d.driftCount > 0, !d.blocked,
+           (try? await service.reconcile()) != nil {
+            self.doctor = await attempt { try await self.service.doctor() } ?? self.doctor
+        }
         self.agents = await agents ?? self.agents
         self.mcps = await mcps ?? self.mcps
         self.skills = await skills ?? self.skills

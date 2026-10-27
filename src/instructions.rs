@@ -49,8 +49,8 @@ Fusebox is the single source of truth on this machine for agent secrets, MCP ser
 Secrets and MCP:
 - Secrets live only in `{secrets}`; never in project `.env`, README, native app configs, chats, shell history, or logs. Never print a secret value unless the user explicitly asks for a local-only diagnostic and redaction is impossible.
 - Write with `fusebox secret set --stdin NAME` (or `--fd N`), never as a command argument; read only via `fusebox secret get --fd N NAME` into a non-TTY descriptor; list names with `fusebox secret list`.
-- `{config}` is the central tool config. Run `fusebox doctor` before MCP/tool changes and `fusebox reconcile` to regenerate native configs. Generated MCP entries stay in the `agent-*` namespace. A new provider gets only its secret name in config.
-- Every MCP server is either resident or on demand. On-demand servers run behind the `agent-hub` MCP: use its `fusebox_servers` tool to see them (pass `server` to start one and list its tools) and `fusebox_call` to call a tool. Switch with `fusebox mcp direct ID` / `fusebox mcp hub ID`, then `fusebox reconcile`.
+- `{config}` is the central tool config. Fusebox commands that change the setup sync every agent themselves; `fusebox reconcile` re-syncs after hand edits, `fusebox doctor` shows what is out of sync. Generated MCP entries stay in the `agent-*` namespace. A new provider gets only its secret name in config.
+- Every MCP server is either resident or on demand. On-demand servers run behind the `agent-hub` MCP: use its `fusebox_servers` tool to see them (pass `server` to start one and list its tools) and `fusebox_call` to call a tool. Switch with `fusebox mcp direct ID` / `fusebox mcp hub ID`.
 
 Skills (sources in `{hub}`):
 - Every Skill is either resident (in your skill list) or on demand. When no listed skill fits a task, run `fusebox skills search WORDS`; if one fits, run `fusebox skills show NAME` and follow it.
@@ -59,6 +59,13 @@ Skills (sources in `{hub}`):
 - Apply `fusebox advise` suggestions only after the user approves them. If unexpected global Skills appear, report them without changing activation and do not block unrelated tasks.
 - Third-party Skills live once under `vendor/` with a locked commit; self-authored ones in Git-managed `own/` or their own repos. `{global_skills}` is generated output: never copy Skills there by hand. Do not run broad global installs such as `skills add ... -g --all` unless asked.
 - Never store credentials in Skill files, Skill references, Skill scripts, registry files, lock files, or audit reports.
+
+Installing — whenever the user asks to install, add or set up a Skill, MCP server or CLI (a link, repo, package or README snippet), even without naming Fusebox:
+- Read what it ships first (SKILL.md, scripts, the server command) and report anything unsafe before installing.
+- Skill: `fusebox install skill SOURCE` (GitHub URL, `owner/repo` or a local folder); it is on demand, add `--resident-in PROFILE` only when asked. Never use `npx skills add` or copy Skills into an agent's skill folder.
+- MCP server: `fusebox install mcp ID --command CMD --arg A...` (or `--url URL` for a remote server), one `--secret NAME` per key; it is on demand, add `--resident` only when asked. Never use `claude mcp add`, `codex mcp add` or edit an agent's MCP config by hand.
+- CLI: install with its package manager (brew, npm, uv, pipx); its keys go into Fusebox secrets, never `.env` or shell profiles; a Skill or MCP it ships goes through `fusebox install`.
+- Ask the user for missing keys and store them with `fusebox secret set --stdin NAME`.
 "
     )
 }

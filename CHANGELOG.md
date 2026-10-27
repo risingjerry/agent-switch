@@ -2,6 +2,20 @@
 
 All notable changes to Fusebox (formerly Agent Switch) are documented here.
 
+## Unreleased
+
+### Added
+
+- `fusebox install skill SOURCE` (GitHub URL, `owner/repo` or a folder) and
+  `fusebox install mcp ID` (`--command` or `--url`); both on demand by default.
+- Agent instructions now route every "install this Skill / MCP / CLI" request
+  through Fusebox.
+
+### Changed
+
+- Commands that change the setup sync every agent when they finish
+  (`--no-sync` skips); the app syncs drift from outside Fusebox on refresh.
+
 ## 0.4.0 - 2026-10-26
 
 Renamed to **Fusebox** and rewritten in Rust as a single binary.

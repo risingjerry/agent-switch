@@ -50,11 +50,14 @@ git clone https://github.com/risingjerry/fusebox && fusebox/scripts/install.sh
 
 ```bash
 fusebox doctor                     # 看它发现了什么、准备写什么（不会写入）
-fusebox skills add-source my-skills --path ~/.claude/skills-src   # 或 --git URL
-fusebox mcp add github --command npx --arg -y --arg @example/github-mcp@1.2.3 --secret GITHUB_TOKEN
-printf %s "$TOKEN" | fusebox secret set --stdin GITHUB_TOKEN   # 密钥不会出现在命令参数或日志里
 fusebox reconcile                  # 写入各 Agent 的配置（先备份）
+fusebox install skill owner/repo   # 也可以是 GitHub 链接或本地文件夹；按锁定的提交克隆
+fusebox install mcp github --command npx --arg -y --arg @example/github-mcp@1.2.3 --secret GITHUB_TOKEN
+printf %s "$TOKEN" | fusebox secret set --stdin GITHUB_TOKEN   # 密钥不会出现在命令参数或日志里
 ```
+
+每条会改动配置的命令做完都会自动同步所有 Agent；各 Agent 的全局说明也要求它们通过 Fusebox 安装。
+对任何 Agent 说"帮我装这个 Skill：<链接>"，它都会装进 Fusebox，而不是只装进某一个 Agent 的目录。
 
 新加的 MCP 和 Skill 默认**按需**。要常驻：`fusebox mcp direct ID` 或 `fusebox skills enable global NAME`。
 
@@ -97,6 +100,7 @@ Agent 会调用 `fusebox find`、`fusebox advise --json` 以及 hub 的 `fusebox
 | `fusebox status` / `doctor` | 配置偏差、缺失密钥、问题；不写入 |
 | `fusebox reconcile [--dry-run]` | 写入原生配置、启动脚本和说明（带备份） |
 | `fusebox find 关键词` | 为任务给 Skill 和 MCP 排序 |
+| `fusebox install skill 来源` · `install mcp ID` | 从仓库/文件夹装 Skill，或装 MCP（远程用 `--url`）；默认按需 |
 | `fusebox mcp list\|add\|set\|remove\|import` | 管理 MCP；`mcp hub ID` / `mcp direct ID` 切换按需 / 常驻 |
 | `fusebox secret set --stdin NAME` · `list` · `delete` | 密钥库（只输出名字） |
 | `fusebox skills add-source\|fetch\|enable\|disable\|move\|drop\|restore` | Skill 来源与状态 |

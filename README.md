@@ -55,11 +55,15 @@ Then:
 
 ```bash
 fusebox doctor                     # what it found and what it would write (writes nothing)
-fusebox skills add-source my-skills --path ~/.claude/skills-src   # or --git URL
-fusebox mcp add github --command npx --arg -y --arg @example/github-mcp@1.2.3 --secret GITHUB_TOKEN
-printf %s "$TOKEN" | fusebox secret set --stdin GITHUB_TOKEN   # the value never appears in argv or logs
 fusebox reconcile                  # write every agent's config (backups first)
+fusebox install skill owner/repo   # or a GitHub URL / local folder; cloned at a locked commit
+fusebox install mcp github --command npx --arg -y --arg @example/github-mcp@1.2.3 --secret GITHUB_TOKEN
+printf %s "$TOKEN" | fusebox secret set --stdin GITHUB_TOKEN   # the value never appears in argv or logs
 ```
+
+Every command that changes the setup syncs all agents when it finishes, and
+each agent's instructions tell it to install through Fusebox: ask any agent to
+"install this skill: <link>" and it lands here, not in one agent's folder.
 
 New MCP servers and Skills are **on demand** by default. Make one resident
 with `fusebox mcp direct ID` or `fusebox skills enable global NAME`.
@@ -105,6 +109,7 @@ for agents working on this repository.
 | `fusebox status` / `doctor` | drift, missing secrets, findings; writes nothing |
 | `fusebox reconcile [--dry-run]` | write native configs, wrappers and instructions (with backups) |
 | `fusebox find WORDS` | rank Skills and MCP servers for a task |
+| `fusebox install skill SOURCE` · `install mcp ID` | add Skills from a repo/folder, or an MCP server (`--url` for remote); on demand by default |
 | `fusebox mcp list\|add\|set\|remove\|import` | manage MCP servers; `mcp hub ID` / `mcp direct ID` switch on demand / resident |
 | `fusebox secret set --stdin NAME` · `list` · `delete` | the secret store (names only on output) |
 | `fusebox skills add-source\|fetch\|enable\|disable\|move\|drop\|restore` | Skill sources and states |
