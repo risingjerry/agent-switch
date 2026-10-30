@@ -57,6 +57,7 @@ Then:
 fusebox doctor                     # what it found and what it would write (writes nothing)
 fusebox reconcile                  # write every agent's config (backups first)
 fusebox install skill owner/repo   # or a GitHub URL / local folder; cloned at a locked commit
+fusebox uninstall skill NAME       # gone from every profile, agent, registry, lock and vendor/
 fusebox install mcp github --command npx --arg -y --arg @example/github-mcp@1.2.3 --secret GITHUB_TOKEN
 printf %s "$TOKEN" | fusebox secret set --stdin GITHUB_TOKEN   # the value never appears in argv or logs
 ```
@@ -110,6 +111,7 @@ for agents working on this repository.
 | `fusebox reconcile [--dry-run]` | write native configs, wrappers and instructions (with backups) |
 | `fusebox find WORDS` | rank Skills and MCP servers for a task |
 | `fusebox install skill SOURCE` · `install mcp ID` | add Skills from a repo/folder, or an MCP server (`--url` for remote); on demand by default |
+| `fusebox uninstall skill NAME\|SOURCE` | remove a Skill source completely (a local folder is kept) |
 | `fusebox mcp list\|add\|set\|remove\|import` | manage MCP servers; `mcp hub ID` / `mcp direct ID` switch on demand / resident |
 | `fusebox secret set --stdin NAME` · `list` · `delete` | the secret store (names only on output) |
 | `fusebox skills add-source\|fetch\|enable\|disable\|move\|drop\|restore` | Skill sources and states |
