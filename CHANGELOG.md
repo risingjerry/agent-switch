@@ -8,6 +8,9 @@ All notable changes to Fusebox (formerly Agent Switch) are documented here.
 
 - `fusebox install skill SOURCE` (GitHub URL, `owner/repo` or a folder) and
   `fusebox install mcp ID` (`--command` or `--url`); both on demand by default.
+- `fusebox uninstall skill NAME|SOURCE` removes a Skill source everywhere:
+  profile entries, links in every agent, registry and lock entries, and its
+  `vendor/` checkout. A local folder is unregistered but kept.
 - Agent instructions now route every "install this Skill / MCP / CLI" request
   through Fusebox.
 

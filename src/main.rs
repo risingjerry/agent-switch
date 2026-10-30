@@ -165,6 +165,8 @@ Usage: fusebox [--home DIR] [--user-home DIR] [--config FILE] <command>
   install skill SOURCE [--id ID] [--ref R] [--skill-path P] [--resident-in PROFILE]
                                         GitHub URL, owner/repo or local folder → on-demand Skills
   install mcp ID (--command C [--arg A]... | --url URL) [--secret NAME]... [--resident]
+  uninstall skill NAME|SOURCE [--json]  remove a Skill source everywhere: profiles, links, registry,
+                                        lock and its vendor/ checkout (a local folder is kept)
   agents | clis [--json]                detected agents / installed CLIs
   mcp list|add|set|remove|enable|disable|import
   mcp hub ID | mcp direct ID            serve an MCP lazily through the hub, or natively
@@ -182,7 +184,7 @@ Usage: fusebox [--home DIR] [--user-home DIR] [--config FILE] <command>
   hub APP                               lazy MCP proxy (used by the agent-hub entry)
   write-default-config
 
-Commands that change the setup (install, mcp add/set/remove/enable/disable/hub/direct,
+Commands that change the setup (install, uninstall, mcp add/set/remove/enable/disable/hub/direct,
 skills add-source/fetch/update/enable/disable/drop/restore/move) sync every agent
 afterwards; pass --no-sync to skip.
 ";
@@ -232,7 +234,7 @@ fn dispatch(argv: &[String]) -> Result<i32> {
 fn changes_setup(pos: &[String]) -> bool {
     let sub = pos.get(1).map(String::as_str).unwrap_or("");
     match pos[0].as_str() {
-        "install" => true,
+        "install" | "uninstall" => true,
         "mcp" => matches!(sub, "add" | "set" | "remove" | "enable" | "disable" | "hub" | "direct"),
         "skills" => {
             matches!(sub, "add-source" | "fetch" | "update" | "enable" | "disable" | "drop" | "restore" | "move")
@@ -258,6 +260,7 @@ fn autosync(ctx: &Ctx, json: bool) -> Result<i32> {
 fn run_command(ctx: &Ctx, args: &Args, rest: &Args) -> Result<i32> {
     match args.pos[0].as_str() {
         "install" => cmd_install(ctx, rest),
+        "uninstall" => cmd_uninstall(ctx, rest),
         "doctor" | "status" => cmd_doctor(ctx, rest),
         "reconcile" => cmd_reconcile(ctx, rest),
         "agents" => {
@@ -719,6 +722,56 @@ fn install_skill(ctx: &Ctx, a: &Args) -> Result<i32> {
         }
         if !shadowed.is_empty() {
             print(&format!("note: another source already has {}\n", shadowed.join(", ")));
+        }
+    }
+    Ok(0)
+}
+
+/// `uninstall skill NAME|SOURCE`: a source id, or the name of the only Skill
+/// in its source. MCP servers are removed with `mcp remove`.
+fn cmd_uninstall(ctx: &Ctx, a: &Args) -> Result<i32> {
+    a.check(&["json"])?;
+    match a.pos(0, "what to uninstall (skill)")? {
+        "skill" => {}
+        "mcp" => return Err("remove an MCP server with `fusebox mcp remove ID`".into()),
+        other => return Err(format!("unknown uninstall kind: {other} (skill)")),
+    }
+    let target = a.pos(1, "NAME or SOURCE")?;
+    let hub = ctx.hub()?;
+    let catalog = skills::catalog(&ctx.hub_root())?;
+    let id = if hub.source_base(target).is_ok() {
+        target.to_string()
+    } else {
+        let entry = catalog.iter().find(|e| e.name == target).ok_or(format!("no Skill or source named {target}"))?;
+        let id = entry.id.split_once(':').map_or(entry.id.as_str(), |(s, _)| s).to_string();
+        let siblings: Vec<&str> =
+            catalog.iter().filter(|e| e.id.starts_with(&format!("{id}:"))).map(|e| e.name.as_str()).collect();
+        if siblings.len() > 1 {
+            return Err(format!(
+                "{target} comes from source {id} with {} Skills ({}); uninstall the source with `fusebox uninstall skill {id}`, \
+                 or take just this one out with `fusebox skills drop {target}`",
+                siblings.len(),
+                siblings.join(", ")
+            ));
+        }
+        id
+    };
+    let out = skills::uninstall(&hub, &id)?;
+    let path = |p: &Option<std::path::PathBuf>| p.as_ref().map(|p| p.to_string_lossy().into_owned());
+    if a.flag("json") {
+        let payload = json!({"uninstalled": id, "skills": out.skills, "profiles": out.profiles,
+            "deleted": path(&out.deleted), "kept": path(&out.kept)});
+        print(&(json_pretty(&payload) + "\n"));
+    } else {
+        print(&format!("uninstalled {id}: {}\n", out.skills.join(", ")));
+        if !out.profiles.is_empty() {
+            print(&format!("  removed from profile(s): {}\n", out.profiles.join(", ")));
+        }
+        if let Some(p) = path(&out.deleted) {
+            print(&format!("  deleted {p}\n"));
+        }
+        if let Some(p) = path(&out.kept) {
+            print(&format!("  kept your folder {p}\n"));
         }
     }
     Ok(0)
@@ -1848,6 +1901,7 @@ mod tests {
     fn only_writes_trigger_a_sync() {
         let pos = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
         assert!(changes_setup(&pos(&["install", "skill", "x"])));
+        assert!(changes_setup(&pos(&["uninstall", "skill", "x"])));
         assert!(changes_setup(&pos(&["mcp", "hub", "x"])));
         assert!(changes_setup(&pos(&["skills", "add-source", "x"])));
         assert!(!changes_setup(&pos(&["mcp", "list"])));

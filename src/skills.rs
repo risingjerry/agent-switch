@@ -601,6 +601,61 @@ pub fn remove_source(hub: &Hub, id: &str) -> Result<()> {
     Ok(())
 }
 
+pub struct Uninstalled {
+    pub skills: Vec<String>,
+    pub profiles: Vec<String>,
+    pub deleted: Option<PathBuf>,
+    pub kept: Option<PathBuf>,
+}
+
+/// Remove a source for good: its entries in every profile (and their
+/// on-demand bookkeeping), the registry and lock entries, and a git checkout
+/// under `vendor/`. A local folder is the author's own work and stays.
+/// Re-syncs the touched profiles so their links are pruned.
+pub fn uninstall(hub: &Hub, id: &str) -> Result<Uninstalled> {
+    let src = hub.source(id)?;
+    let base = hub.source_base(id)?;
+    let prefix = format!("{id}:");
+    let mut skills: BTreeSet<String> =
+        catalog(&hub.root)?.into_iter().filter(|e| e.id.starts_with(&prefix)).map(|e| e.name).collect();
+    let mut profiles = Vec::new();
+    for name in hub.profile_names() {
+        let file = hub.profile_path(&name)?;
+        let mut profile = read_json_object(&file)?;
+        let items = profile_skills(&profile);
+        let (gone, kept): (Vec<_>, Vec<_>) = items.into_iter().partition(|i| s(i.get("source")) == Some(id));
+        skills.extend(gone.iter().map(entry_name));
+        let mut changed = !gone.is_empty();
+        profile.insert("skills".into(), Value::Array(kept.into_iter().map(Value::Object).collect()));
+        if let Some(Value::Object(since)) = profile.get_mut("onDemandSince") {
+            for n in &skills {
+                changed |= since.remove(n).is_some();
+            }
+        }
+        if changed {
+            write_json(&file, &Value::Object(profile))?;
+            profiles.push(name);
+        }
+    }
+    remove_source(hub, id)?;
+    let (mut deleted, mut kept) = (None, None);
+    if s(src.get("type")) == Some("git") {
+        // Only ever delete inside the hub's vendor/ directory.
+        let vendor = resolve_lenient(&hub.root.join("vendor"));
+        if base.starts_with(&vendor) && base != vendor && base.exists() {
+            fs::remove_dir_all(&base).map_err(|e| format!("{}: {e}", base.display()))?;
+            deleted = Some(base);
+        }
+    } else {
+        kept = Some(base);
+    }
+    let hub = Hub::load(&hub.root)?;
+    for p in &profiles {
+        sync_any(&hub, p)?;
+    }
+    Ok(Uninstalled { skills: skills.into_iter().collect(), profiles, deleted, kept })
+}
+
 /// Default branch of a remote repository, from `git ls-remote --symref`.
 pub fn remote_head(hub: &Hub, url: &str) -> Option<String> {
     let out = git(&["ls-remote", "--symref", url, "HEAD"], &hub.root).ok()?;
@@ -1108,6 +1163,64 @@ mod tests {
         assert!(disable(&hub, "p", "alpha").unwrap());
         let events = sync_profile(&hub, "p", false, true).unwrap();
         assert_eq!(events, vec!["pruned: .agents/skills/alpha", "pruned: .claude/skills/alpha"]);
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn uninstall_leaves_nothing_behind() {
+        let base = std::env::temp_dir().join(format!("as-uninstall-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let hub_root = base.join("hub");
+        fs::create_dir_all(hub_root.join("config")).unwrap();
+        fs::create_dir_all(hub_root.join("profiles")).unwrap();
+        fs::create_dir_all(hub_root.join("vendor/snd/beta")).unwrap();
+        fs::write(hub_root.join("vendor/snd/beta/SKILL.md"), "---\nname: beta\n---\n").unwrap();
+        fs::create_dir_all(base.join("src/alpha")).unwrap();
+        fs::write(base.join("src/alpha/SKILL.md"), "---\nname: alpha\n---\n").unwrap();
+        fs::write(
+            hub_root.join("config/registry.json"),
+            json!({"sources": {
+                       "snd": {"type": "git", "url": "x", "ref": "main", "checkout": "vendor/snd", "skillPath": "."},
+                       "mine": {"type": "local", "path": base.join("src").to_string_lossy()}},
+                   "agentSkillDirs": {"claude": ".claude/skills"}})
+            .to_string(),
+        )
+        .unwrap();
+        fs::write(
+            hub_root.join("skills.lock.json"),
+            json!({"version": 1, "sources": {"snd": {"revision": "r"}}}).to_string(),
+        )
+        .unwrap();
+        let project = base.join("proj");
+        fs::write(
+            hub_root.join("profiles/p.json"),
+            json!({"project": project.to_string_lossy(), "agents": ["claude"], "skills": [],
+                   "onDemandSince": {"beta": "2026-10-01"}})
+            .to_string(),
+        )
+        .unwrap();
+        let hub = Hub::load(&hub_root).unwrap();
+        enable(&hub, "p", "beta", "snd", None).unwrap();
+        enable(&hub, "p", "alpha", "mine", None).unwrap();
+        sync_profile(&hub, "p", false, true).unwrap();
+        assert!(project.join(".claude/skills/beta/SKILL.md").exists());
+
+        let out = uninstall(&hub, "snd").unwrap();
+        assert_eq!(out.skills, vec!["beta"]);
+        assert_eq!(out.profiles, vec!["p"]);
+        assert!(!hub_root.join("vendor/snd").exists());
+        assert!(!project.join(".claude/skills/beta").exists() && !project.join(".agents/skills/beta").exists());
+        assert!(project.join(".claude/skills/alpha/SKILL.md").exists());
+        let text = |p: &str| fs::read_to_string(hub_root.join(p)).unwrap();
+        assert!(!text("config/registry.json").contains("\"snd\""));
+        assert!(!text("skills.lock.json").contains("\"snd\""));
+        assert!(!text("profiles/p.json").contains("beta"));
+
+        // A local source is unregistered but its folder is kept.
+        let out = uninstall(&Hub::load(&hub_root).unwrap(), "mine").unwrap();
+        assert_eq!(out.kept.as_deref(), Some(resolve_lenient(&base.join("src")).as_path()));
+        assert!(base.join("src/alpha/SKILL.md").exists());
+        assert!(!project.join(".claude/skills/alpha").exists());
         let _ = fs::remove_dir_all(&base);
     }
 }

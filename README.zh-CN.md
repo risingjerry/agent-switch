@@ -52,6 +52,7 @@ git clone https://github.com/risingjerry/fusebox && fusebox/scripts/install.sh
 fusebox doctor                     # 看它发现了什么、准备写什么（不会写入）
 fusebox reconcile                  # 写入各 Agent 的配置（先备份）
 fusebox install skill owner/repo   # 也可以是 GitHub 链接或本地文件夹；按锁定的提交克隆
+fusebox uninstall skill 名字        # 从所有配置、各 Agent、登记、锁和 vendor/ 里删干净
 fusebox install mcp github --command npx --arg -y --arg @example/github-mcp@1.2.3 --secret GITHUB_TOKEN
 printf %s "$TOKEN" | fusebox secret set --stdin GITHUB_TOKEN   # 密钥不会出现在命令参数或日志里
 ```
@@ -101,6 +102,7 @@ Agent 会调用 `fusebox find`、`fusebox advise --json` 以及 hub 的 `fusebox
 | `fusebox reconcile [--dry-run]` | 写入原生配置、启动脚本和说明（带备份） |
 | `fusebox find 关键词` | 为任务给 Skill 和 MCP 排序 |
 | `fusebox install skill 来源` · `install mcp ID` | 从仓库/文件夹装 Skill，或装 MCP（远程用 `--url`）；默认按需 |
+| `fusebox uninstall skill 名字\|来源` | 彻底卸载一个 Skill 来源（本地文件夹保留） |
 | `fusebox mcp list\|add\|set\|remove\|import` | 管理 MCP；`mcp hub ID` / `mcp direct ID` 切换按需 / 常驻 |
 | `fusebox secret set --stdin NAME` · `list` · `delete` | 密钥库（只输出名字） |
 | `fusebox skills add-source\|fetch\|enable\|disable\|move\|drop\|restore` | Skill 来源与状态 |
